@@ -7,10 +7,10 @@ from pyspark.sql.functions import col, when
 from pyspark.mllib.evaluation import MulticlassMetrics
 import time
 
-spark = SparkSession.builder.appName("TelcoChurn_GBT").master("local[*]").getOrCreate()
+spark = SparkSession.builder.appName("TelcoChurn_GBT").getOrCreate()
 spark.sparkContext.setLogLevel("WARN")
 
-df = spark.read.option("header", True).option("inferSchema", True).csv("/home/group12/distributed-ml/data/telco_churn.csv")
+df = spark.read.option("header", True).option("inferSchema", True).csv("gs://nt533q13-spark-data/data/telco_customer_churn.csv")
 
 df = df.withColumn("TotalCharges", when(col("TotalCharges") == " ", None)
                    .otherwise(col("TotalCharges")).cast("double"))
@@ -51,7 +51,7 @@ print(f"Precision (rời đi): {metrics.precision(1):.2f}")
 print(f"Recall (rời đi): {metrics.recall(1):.2f}")
 print(f"F1-score (rời đi): {metrics.fMeasure(1):.2f}")
 
-model_path = "../models/telco_gbt"
+model_path = "gs://nt533q13-spark-data/models/telco_gbt"
 model.write().overwrite().save(model_path)
 print(f"\n💾 Model saved to {model_path}")
 

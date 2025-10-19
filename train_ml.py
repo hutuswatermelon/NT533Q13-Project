@@ -5,10 +5,10 @@ from pyspark.ml.classification import RandomForestClassifier
 from pyspark.ml.evaluation import BinaryClassificationEvaluator
 from pyspark.sql.functions import col, when  
 
-spark = SparkSession.builder.appName("TelcoChurnPrediction").master("local[*]").getOrCreate()
+spark = SparkSession.builder.appName("TelcoChurnPrediction").getOrCreate()
 spark.sparkContext.setLogLevel("WARN")
 
-df = spark.read.option("header", True).option("inferSchema", True).csv("/home/group12/distributed-ml/data/telco_churn.csv")
+df = spark.read.option("header", True).option("inferSchema", True).csv("gs://nt533q13-spark-data/data/telco_customer_churn.csv")
 
 df = df.withColumn(
     "TotalCharges",
@@ -56,8 +56,8 @@ print(f"🏠 Ở lại: {stay} khách hàng")
 print(f"🚪 Rời đi: {leave} khách hàng")
 print(f"Tổng cộng: {total} khách hàng")
 
-model.write().overwrite().save("/home/group12/distributed-ml/models/telco_rf")
-print("✅ Model saved to /home/group12/distributed-ml/models/telco_rf")
+model.write().overwrite().save("gs://nt533q13-spark-data/models/telco_rf")
+print("✅ Model saved to gs://nt533q13-spark-data/models/telco_rf")
 
 print("\n📋 Kết quả chi tiết (10 khách hàng đầu tiên):")
 predictions.select("customerID", "gender", "Contract", "MonthlyCharges", 

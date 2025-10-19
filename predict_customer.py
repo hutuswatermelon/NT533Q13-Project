@@ -1,10 +1,10 @@
 from pyspark.sql import SparkSession
 from pyspark.ml import PipelineModel
 
-spark = SparkSession.builder.appName("PredictTelcoChurn").master("local[*]").getOrCreate()
+spark = SparkSession.builder.appName("PredictTelcoChurn").getOrCreate()
 spark.sparkContext.setLogLevel("WARN")
 
-model_path = "/home/group12/distributed-ml/models/telco_rf"
+model_path = "gs://nt533q13-spark-data/models/telco_rf"
 model = PipelineModel.load(model_path)
 print(f"✅ Model loaded from {model_path}")
 

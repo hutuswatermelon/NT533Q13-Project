@@ -7,14 +7,13 @@ import matplotlib.pyplot as plt
 # 1️⃣ Khởi tạo Spark
 spark = SparkSession.builder \
     .appName("WholesaleCustomersClustering") \
-    .master("local[*]") \
     .config("spark.driver.memory", "4g") \
     .getOrCreate()
 
 spark.sparkContext.setLogLevel("WARN")
 
 # 2️⃣ Đọc dữ liệu
-df = spark.read.option("header", True).option("inferSchema", True).csv("/home/group12/distributed-ml/data/wholesale_customers.csv")
+df = spark.read.option("header", True).option("inferSchema", True).csv("gs://nt533q13-spark-data/data/wholesale_customers.csv")
 print("✅ Dữ liệu đã đọc:")
 df.show(5)
 
@@ -51,7 +50,7 @@ print("\n📊 Trung bình mỗi cụm:")
 predictions.groupBy("prediction").avg(*numeric_cols).show()
 
 # 1️⃣1️⃣ Lưu mô hình
-model.save("/home/group12/distributed-ml/models/kmeans_wholesale")
+model.save("gs://nt533q13-spark-data/models/kmeans_wholesale")
 print("✅ Mô hình KMeans đã được lưu tại /models/kmeans_wholesale")
 
 # 1️⃣2️⃣ Vẽ biểu đồ 2 chiều (Milk vs Grocery) để minh họa
@@ -62,7 +61,7 @@ plt.scatter(sample["Milk"], sample["Grocery"], c=sample["prediction"], cmap="rai
 plt.xlabel("Milk (Annual Spending)")
 plt.ylabel("Grocery (Annual Spending)")
 plt.title(f"KMeans Clustering (k={k}) - Wholesale Customers")
-plt.savefig("/home/group12/distributed-ml/data/wholesale_clusters.png")
+plt.savefig("gs://nt533q13-spark-data/plots/wholesale_clusters.png")
 print("📊 Biểu đồ cụm đã lưu tại: /data/wholesale_clusters.png")
 
 spark.stop()

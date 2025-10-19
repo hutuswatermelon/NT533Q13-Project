@@ -12,7 +12,6 @@ from pyspark.sql import SparkSession
 
 spark = SparkSession.builder \
     .appName("TelcoClustering") \
-    .master("local[*]") \
     .config("spark.driver.memory", "4g") \
     .getOrCreate()
 
@@ -22,7 +21,7 @@ spark.sparkContext.setLogLevel("WARN")
 spark.sparkContext.setLogLevel("WARN")
 
 
-df = spark.read.option("header", True).option("inferSchema", True).csv("/home/group12/distributed-ml/data/telco_churn.csv")
+df = spark.read.option("header", True).option("inferSchema", True).csv("gs://nt533q13-spark-data/data/telco_customer_churn.csv")
 
 
 df = df.withColumn("TotalCharges", when(col("TotalCharges") == " ", None).otherwise(col("TotalCharges")).cast("double"))
@@ -79,7 +78,7 @@ silhouette = evaluator.evaluate(predictions)
 print(f"\n📈 Silhouette with squared euclidean distance = {silhouette:.4f}")
 
 
-model.save("/home/group12/distributed-ml/models/kmeans_telco")
+model.save("gs://nt533q13-spark-data/models/kmeans_telco")
 
 print("✅ Mô hình KMeans đã được lưu tại /models/kmeans_telco")
 
@@ -97,7 +96,7 @@ plt.ylabel("Total Charges")
 
 plt.title(f"KMeans Clustering (k={k}) - Telco Customers")
 
-plt.savefig("/home/group12/distributed-ml/data/kmeans_clusters.png")
+plt.savefig("gs://nt533q13-spark-data/plots/kmeans_clusters.png")
 
 print("📊 Biểu đồ cụm đã lưu tại: /data/kmeans_clusters.png")
 
