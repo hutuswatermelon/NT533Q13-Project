@@ -1,16 +1,13 @@
 from flask import Flask, request, jsonify
 from pyspark.sql import SparkSession
 from pyspark.ml import PipelineModel
-import os
 
 app = Flask(__name__)
 
-# Khởi tạo Spark session
+# Khởi tạo Spark session, dùng ADC (Application Default Credentials)
 spark = SparkSession.builder \
     .appName("ChurnPredictionAPI") \
     .config("spark.hadoop.fs.gs.impl", "com.google.cloud.hadoop.fs.gcs.GoogleHadoopFileSystem") \
-    .config("spark.hadoop.google.cloud.auth.service.account.enable", "true") \
-    .config("spark.hadoop.google.cloud.auth.service.account.json.keyfile", "/home/caphuutu2005/key.json") \
     .getOrCreate()
 
 # 📌 Đường dẫn tới mô hình đã train và lưu trên GCS
@@ -46,4 +43,4 @@ def health():
     return "OK", 200
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=80)
+    app.run(host="0.0.0.0", port=8080)
