@@ -16,7 +16,7 @@ spark = (
     .config("spark.hadoop.fs.gs.impl", "com.google.cloud.hadoop.fs.gcs.GoogleHadoopFileSystem")
     # Sử dụng Application Default Credentials từ metadata server
     .config("spark.hadoop.google.cloud.auth.service.account.enable", "true")
-    # ID của project GCP — thay bằng đúng project của bạn
+    # ID của project GCP
     .config("spark.hadoop.fs.gs.project.id", "nt533q13-distributed-ml")
     .getOrCreate()
 )
