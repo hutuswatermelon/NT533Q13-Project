@@ -3,3 +3,4 @@ pyspark==3.5.1
 google-cloud-storage
 numpy
 gunicorn
+pandas
