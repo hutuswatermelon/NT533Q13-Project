@@ -62,7 +62,16 @@ REQUIRED_COLUMNS = [
 # =========================
 @app.route("/", methods=["GET"])
 def index():
-    return render_template("index.html")
+    available_models = [
+        {"id": "telco_rf", "name": "Random Forest (Telco)"},
+    ]
+    selected_model = request.args.get("model", available_models[0]["id"])
+    return render_template(
+        "index.html",
+        models=available_models,
+        selected_model=selected_model,
+        required_columns=REQUIRED_COLUMNS,
+    )
 
 # ====================================
 # 🚀 API predict

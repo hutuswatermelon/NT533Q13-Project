@@ -6,21 +6,68 @@
 
 body {
     margin: 0;
-    display: flex;
-    justify-content: center;
-    align-items: center;
     min-height: 100vh;
+    background-color: #f5f7fa;
+}
+
+.layout {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    gap: 2rem;
+    max-width: 1100px;
+    margin: 3rem auto;
+    padding: 0 2rem 3rem;
+}
+
+.sidebar {
+    background: #ffffff;
+    padding: 1.8rem;
+    border-radius: 16px;
+    box-shadow: 0 20px 45px rgba(15, 23, 42, 0.07);
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.sidebar h2 {
+    margin: 0;
+    font-size: 1.2rem;
+}
+
+.model-option {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.6rem 0.8rem;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background 0.2s ease;
+}
+
+.model-option:hover {
+    background: #f1f5f9;
+}
+
+.model-option input {
+    accent-color: #2563eb;
+}
+
+.sidebar-info {
+    font-size: 0.85rem;
+    color: #6b7280;
+    margin-top: auto;
 }
 
 .container {
-    background: #ffffff;
-    padding: 2.5rem;
-    border-radius: 16px;
-    box-shadow: 0 20px 45px rgba(15, 23, 42, 0.12);
-    width: min(480px, 90vw);
     display: flex;
     flex-direction: column;
     gap: 1.5rem;
+}
+
+h1 {
+    margin: 0;
+    font-size: 1.8rem;
+    text-align: left;
 }
 
 .card {
@@ -28,18 +75,13 @@ body {
     border-radius: 14px;
     padding: 1.5rem;
     background: #ffffff;
+    box-shadow: 0 20px 45px rgba(15, 23, 42, 0.04);
 }
 
 .card h2 {
     margin-top: 0;
     margin-bottom: 1rem;
     font-size: 1.2rem;
-}
-
-h1 {
-    margin: 0 0 1.5rem;
-    font-size: 1.8rem;
-    text-align: center;
 }
 
 form section {
@@ -63,8 +105,6 @@ select {
 
 input[type="file"] {
     border: 1px dashed #cbd2d9;
-    padding: 0.75rem;
-    border-radius: 10px;
     background-color: #f8fafc;
 }
 
@@ -87,32 +127,6 @@ button,
 button:hover,
 .back-link:hover {
     background: linear-gradient(135deg, #1d4ed8, #1e40af);
-}
-
-.error {
-    color: #dc2626;
-    font-weight: 600;
-}
-
-.prediction,
-.probability {
-    font-size: 1.1rem;
-    margin: 0.7rem 0;
-}
-
-.data-list {
-    list-style: none;
-    padding: 0;
-    margin: 1rem 0;
-}
-
-.data-list li {
-    margin: 0.3rem 0;
-}
-
-.data-list span {
-    font-weight: 600;
-    margin-right: 0.4rem;
 }
 
 .divider {

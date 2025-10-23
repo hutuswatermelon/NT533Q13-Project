@@ -6,184 +6,214 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-    <main class="container">
-        <h1>Customer Churn Prediction</h1>
-
-        <section class="card">
-            <h2>Single prediction</h2>
-            <form method="post" action="{{ url_for('predict') }}">
-                <section>
-                    <label for="customerID">Customer ID</label>
-                    <input id="customerID" name="customerID" type="text" maxlength="20" required>
-                </section>
-                <section>
-                    <label for="gender">Gender</label>
-                    <select id="gender" name="gender" required>
-                        <option value="" disabled selected>Select...</option>
-                        <option value="Male">Male</option>
-                        <option value="Female">Female</option>
-                    </select>
-                </section>
-                <section>
-                    <label for="SeniorCitizen">Senior Citizen</label>
-                    <select id="SeniorCitizen" name="SeniorCitizen" required>
-                        <option value="" disabled selected>Select...</option>
-                        <option value="0">No</option>
-                        <option value="1">Yes</option>
-                    </select>
-                </section>
-                <section>
-                    <label for="Partner">Partner</label>
-                    <select id="Partner" name="Partner" required>
-                        <option value="" disabled selected>Select...</option>
-                        <option value="Yes">Yes</option>
-                        <option value="No">No</option>
-                    </select>
-                </section>
-                <section>
-                    <label for="Dependents">Dependents</label>
-                    <select id="Dependents" name="Dependents" required>
-                        <option value="" disabled selected>Select...</option>
-                        <option value="Yes">Yes</option>
-                        <option value="No">No</option>
-                    </select>
-                </section>
-                <section>
-                    <label for="tenure">Tenure (months)</label>
-                    <input id="tenure" name="tenure" type="number" min="0" required>
-                </section>
-                <section>
-                    <label for="PhoneService">Phone Service</label>
-                    <select id="PhoneService" name="PhoneService" required>
-                        <option value="" disabled selected>Select...</option>
-                        <option value="Yes">Yes</option>
-                        <option value="No">No</option>
-                    </select>
-                </section>
-                <section>
-                    <label for="MultipleLines">Multiple Lines</label>
-                    <select id="MultipleLines" name="MultipleLines" required>
-                        <option value="" disabled selected>Select...</option>
-                        <option value="Yes">Yes</option>
-                        <option value="No">No</option>
-                        <option value="No phone service">No phone service</option>
-                    </select>
-                </section>
-                <section>
-                    <label for="InternetService">Internet Service</label>
-                    <select id="InternetService" name="InternetService" required>
-                        <option value="" disabled selected>Select...</option>
-                        <option value="DSL">DSL</option>
-                        <option value="Fiber optic">Fiber optic</option>
-                        <option value="No">No</option>
-                    </select>
-                </section>
-                <section>
-                    <label for="OnlineSecurity">Online Security</label>
-                    <select id="OnlineSecurity" name="OnlineSecurity" required>
-                        <option value="" disabled selected>Select...</option>
-                        <option value="Yes">Yes</option>
-                        <option value="No">No</option>
-                        <option value="No internet service">No internet service</option>
-                    </select>
-                </section>
-                <section>
-                    <label for="OnlineBackup">Online Backup</label>
-                    <select id="OnlineBackup" name="OnlineBackup" required>
-                        <option value="" disabled selected>Select...</option>
-                        <option value="Yes">Yes</option>
-                        <option value="No">No</option>
-                        <option value="No internet service">No internet service</option>
-                    </select>
-                </section>
-                <section>
-                    <label for="DeviceProtection">Device Protection</label>
-                    <select id="DeviceProtection" name="DeviceProtection" required>
-                        <option value="" disabled selected>Select...</option>
-                        <option value="Yes">Yes</option>
-                        <option value="No">No</option>
-                        <option value="No internet service">No internet service</option>
-                    </select>
-                </section>
-                <section>
-                    <label for="TechSupport">Tech Support</label>
-                    <select id="TechSupport" name="TechSupport" required>
-                        <option value="" disabled selected>Select...</option>
-                        <option value="Yes">Yes</option>
-                        <option value="No">No</option>
-                        <option value="No internet service">No internet service</option>
-                    </select>
-                </section>
-                <section>
-                    <label for="StreamingTV">Streaming TV</label>
-                    <select id="StreamingTV" name="StreamingTV" required>
-                        <option value="" disabled selected>Select...</option>
-                        <option value="Yes">Yes</option>
-                        <option value="No">No</option>
-                        <option value="No internet service">No internet service</option>
-                    </select>
-                </section>
-                <section>
-                    <label for="StreamingMovies">Streaming Movies</label>
-                    <select id="StreamingMovies" name="StreamingMovies" required>
-                        <option value="" disabled selected>Select...</option>
-                        <option value="Yes">Yes</option>
-                        <option value="No">No</option>
-                        <option value="No internet service">No internet service</option>
-                    </select>
-                </section>
-                <section>
-                    <label for="Contract">Contract</label>
-                    <select id="Contract" name="Contract" required>
-                        <option value="" disabled selected>Select...</option>
-                        <option value="Month-to-month">Month-to-month</option>
-                        <option value="One year">One year</option>
-                        <option value="Two year">Two year</option>
-                    </select>
-                </section>
-                <section>
-                    <label for="PaperlessBilling">Paperless Billing</label>
-                    <select id="PaperlessBilling" name="PaperlessBilling" required>
-                        <option value="" disabled selected>Select...</option>
-                        <option value="Yes">Yes</option>
-                        <option value="No">No</option>
-                    </select>
-                </section>
-                <section>
-                    <label for="PaymentMethod">Payment Method</label>
-                    <select id="PaymentMethod" name="PaymentMethod" required>
-                        <option value="" disabled selected>Select...</option>
-                        <option value="Electronic check">Electronic check</option>
-                        <option value="Mailed check">Mailed check</option>
-                        <option value="Bank transfer (automatic)">Bank transfer (automatic)</option>
-                        <option value="Credit card (automatic)">Credit card (automatic)</option>
-                    </select>
-                </section>
-                <section>
-                    <label for="MonthlyCharges">Monthly Charges</label>
-                    <input id="MonthlyCharges" name="MonthlyCharges" type="number" step="0.01" min="0" required>
-                </section>
-                <section>
-                    <label for="TotalCharges">Total Charges</label>
-                    <input id="TotalCharges" name="TotalCharges" type="number" step="0.01" min="0" required>
-                </section>
-                <button type="submit">Predict</button>
+    <div class="layout">
+        <aside class="sidebar">
+            <h2>Models</h2>
+            <form id="modelSelector">
+                {% for model in models %}
+                <label class="model-option">
+                    <input type="radio" name="model" value="{{ model.id }}" {% if model.id == selected_model %}checked{% endif %}>
+                    <span>{{ model.name }}</span>
+                </label>
+                {% endfor %}
             </form>
-        </section>
+            <p class="sidebar-info">More models will be available soon.</p>
+        </aside>
 
-        <div class="divider"><span>or</span></div>
+        <main class="container">
+            <h1>Customer Churn Prediction</h1>
 
-        <section class="card">
-            <h2>Batch prediction</h2>
-            <form method="post" action="{{ url_for('batch_predict') }}" enctype="multipart/form-data">
-                <section>
-                    <label for="csvFile">Upload CSV</label>
-                    <input id="csvFile" name="file" type="file" accept=".csv" required>
-                    <p class="helper-text">Columns required: {{ ', '.join(required_columns) if required_columns else '' }}</p>
-                </section>
-                <button type="submit">Upload & Predict</button>
-            </form>
-        </section>
-    </main>
+            <section class="card">
+                <h2>Single prediction</h2>
+                <form method="post" action="{{ url_for('predict') }}">
+                    <input type="hidden" name="model_name" id="singleModel" value="{{ selected_model }}">
+                    <section>
+                        <label for="customerID">Customer ID</label>
+                        <input id="customerID" name="customerID" type="text" maxlength="20" required>
+                    </section>
+                    <section>
+                        <label for="gender">Gender</label>
+                        <select id="gender" name="gender" required>
+                            <option value="" disabled selected>Select...</option>
+                            <option value="Male">Male</option>
+                            <option value="Female">Female</option>
+                        </select>
+                    </section>
+                    <section>
+                        <label for="SeniorCitizen">Senior Citizen</label>
+                        <select id="SeniorCitizen" name="SeniorCitizen" required>
+                            <option value="" disabled selected>Select...</option>
+                            <option value="0">No</option>
+                            <option value="1">Yes</option>
+                        </select>
+                    </section>
+                    <section>
+                        <label for="Partner">Partner</label>
+                        <select id="Partner" name="Partner" required>
+                            <option value="" disabled selected>Select...</option>
+                            <option value="Yes">Yes</option>
+                            <option value="No">No</option>
+                        </select>
+                    </section>
+                    <section>
+                        <label for="Dependents">Dependents</label>
+                        <select id="Dependents" name="Dependents" required>
+                            <option value="" disabled selected>Select...</option>
+                            <option value="Yes">Yes</option>
+                            <option value="No">No</option>
+                        </select>
+                    </section>
+                    <section>
+                        <label for="tenure">Tenure (months)</label>
+                        <input id="tenure" name="tenure" type="number" min="0" required>
+                    </section>
+                    <section>
+                        <label for="PhoneService">Phone Service</label>
+                        <select id="PhoneService" name="PhoneService" required>
+                            <option value="" disabled selected>Select...</option>
+                            <option value="Yes">Yes</option>
+                            <option value="No">No</option>
+                        </select>
+                    </section>
+                    <section>
+                        <label for="MultipleLines">Multiple Lines</label>
+                        <select id="MultipleLines" name="MultipleLines" required>
+                            <option value="" disabled selected>Select...</option>
+                            <option value="Yes">Yes</option>
+                            <option value="No">No</option>
+                            <option value="No phone service">No phone service</option>
+                        </select>
+                    </section>
+                    <section>
+                        <label for="InternetService">Internet Service</label>
+                        <select id="InternetService" name="InternetService" required>
+                            <option value="" disabled selected>Select...</option>
+                            <option value="DSL">DSL</option>
+                            <option value="Fiber optic">Fiber optic</option>
+                            <option value="No">No</option>
+                        </select>
+                    </section>
+                    <section>
+                        <label for="OnlineSecurity">Online Security</label>
+                        <select id="OnlineSecurity" name="OnlineSecurity" required>
+                            <option value="" disabled selected>Select...</option>
+                            <option value="Yes">Yes</option>
+                            <option value="No">No</option>
+                            <option value="No internet service">No internet service</option>
+                        </select>
+                    </section>
+                    <section>
+                        <label for="OnlineBackup">Online Backup</label>
+                        <select id="OnlineBackup" name="OnlineBackup" required>
+                            <option value="" disabled selected>Select...</option>
+                            <option value="Yes">Yes</option>
+                            <option value="No">No</option>
+                            <option value="No internet service">No internet service</option>
+                        </select>
+                    </section>
+                    <section>
+                        <label for="DeviceProtection">Device Protection</label>
+                        <select id="DeviceProtection" name="DeviceProtection" required>
+                            <option value="" disabled selected>Select...</option>
+                            <option value="Yes">Yes</option>
+                            <option value="No">No</option>
+                            <option value="No internet service">No internet service</option>
+                        </select>
+                    </section>
+                    <section>
+                        <label for="TechSupport">Tech Support</label>
+                        <select id="TechSupport" name="TechSupport" required>
+                            <option value="" disabled selected>Select...</option>
+                            <option value="Yes">Yes</option>
+                            <option value="No">No</option>
+                            <option value="No internet service">No internet service</option>
+                        </select>
+                    </section>
+                    <section>
+                        <label for="StreamingTV">Streaming TV</label>
+                        <select id="StreamingTV" name="StreamingTV" required>
+                            <option value="" disabled selected>Select...</option>
+                            <option value="Yes">Yes</option>
+                            <option value="No">No</option>
+                            <option value="No internet service">No internet service</option>
+                        </select>
+                    </section>
+                    <section>
+                        <label for="StreamingMovies">Streaming Movies</label>
+                        <select id="StreamingMovies" name="StreamingMovies" required>
+                            <option value="" disabled selected>Select...</option>
+                            <option value="Yes">Yes</option>
+                            <option value="No">No</option>
+                            <option value="No internet service">No internet service</option>
+                        </select>
+                    </section>
+                    <section>
+                        <label for="Contract">Contract</label>
+                        <select id="Contract" name="Contract" required>
+                            <option value="" disabled selected>Select...</option>
+                            <option value="Month-to-month">Month-to-month</option>
+                            <option value="One year">One year</option>
+                            <option value="Two year">Two year</option>
+                        </select>
+                    </section>
+                    <section>
+                        <label for="PaperlessBilling">Paperless Billing</label>
+                        <select id="PaperlessBilling" name="PaperlessBilling" required>
+                            <option value="" disabled selected>Select...</option>
+                            <option value="Yes">Yes</option>
+                            <option value="No">No</option>
+                        </select>
+                    </section>
+                    <section>
+                        <label for="PaymentMethod">Payment Method</label>
+                        <select id="PaymentMethod" name="PaymentMethod" required>
+                            <option value="" disabled selected>Select...</option>
+                            <option value="Electronic check">Electronic check</option>
+                            <option value="Mailed check">Mailed check</option>
+                            <option value="Bank transfer (automatic)">Bank transfer (automatic)</option>
+                            <option value="Credit card (automatic)">Credit card (automatic)</option>
+                        </select>
+                    </section>
+                    <section>
+                        <label for="MonthlyCharges">Monthly Charges</label>
+                        <input id="MonthlyCharges" name="MonthlyCharges" type="number" step="0.01" min="0" required>
+                    </section>
+                    <section>
+                        <label for="TotalCharges">Total Charges</label>
+                        <input id="TotalCharges" name="TotalCharges" type="number" step="0.01" min="0" required>
+                    </section>
+                    <button type="submit">Predict</button>
+                </form>
+            </section>
+
+            <div class="divider"><span>or</span></div>
+
+            <section class="card">
+                <h2>Batch prediction</h2>
+                <form method="post" action="{{ url_for('batch_predict') }}" enctype="multipart/form-data">
+                    <input type="hidden" name="model_name" id="batchModel" value="{{ selected_model }}">
+                    <section>
+                        <label for="csvFile">Upload CSV</label>
+                        <input id="csvFile" name="file" type="file" accept=".csv" required>
+                        <p class="helper-text">Columns required: {{ ', '.join(required_columns) if required_columns else '' }}</p>
+                    </section>
+                    <button type="submit">Upload & Predict</button>
+                </form>
+            </section>
+        </main>
+    </div>
+
+    <script>
+        const modelInputs = document.querySelectorAll('input[name="model"]');
+        const singleModelInput = document.getElementById('singleModel');
+        const batchModelInput = document.getElementById('batchModel');
+
+        modelInputs.forEach(input => {
+            input.addEventListener('change', event => {
+                singleModelInput.value = event.target.value;
+                batchModelInput.value = event.target.value;
+            });
+        });
+    </script>
 </body>
 </html>
