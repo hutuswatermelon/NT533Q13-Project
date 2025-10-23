@@ -1,0 +1,93 @@
+:root {
+    font-family: "Segoe UI", Tahoma, sans-serif;
+    color: #1f2933;
+    background-color: #f5f7fa;
+}
+
+body {
+    margin: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+}
+
+.container {
+    background: #ffffff;
+    padding: 2.5rem;
+    border-radius: 16px;
+    box-shadow: 0 20px 45px rgba(15, 23, 42, 0.12);
+    width: min(480px, 90vw);
+}
+
+h1 {
+    margin: 0 0 1.5rem;
+    font-size: 1.8rem;
+    text-align: center;
+}
+
+form section {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 1.1rem;
+}
+
+label {
+    font-weight: 600;
+    margin-bottom: 0.4rem;
+}
+
+input,
+select {
+    padding: 0.75rem;
+    border-radius: 10px;
+    border: 1px solid #cbd2d9;
+    font-size: 1rem;
+}
+
+button,
+.back-link {
+    display: inline-block;
+    width: 100%;
+    margin-top: 1rem;
+    padding: 0.85rem;
+    border: none;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #2563eb, #1d4ed8);
+    color: #ffffff;
+    font-weight: 600;
+    text-align: center;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+button:hover,
+.back-link:hover {
+    background: linear-gradient(135deg, #1d4ed8, #1e40af);
+}
+
+.error {
+    color: #dc2626;
+    font-weight: 600;
+}
+
+.prediction,
+.probability {
+    font-size: 1.1rem;
+    margin: 0.7rem 0;
+}
+
+.data-list {
+    list-style: none;
+    padding: 0;
+    margin: 1rem 0;
+}
+
+.data-list li {
+    margin: 0.3rem 0;
+}
+
+.data-list span {
+    font-weight: 600;
+    margin-right: 0.4rem;
+}

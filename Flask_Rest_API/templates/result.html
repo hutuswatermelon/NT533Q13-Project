@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Prediction Result</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <main class="container">
+        <h1>Prediction Result</h1>
+        {% if error %}
+            <p class="error">Error: {{ error }}</p>
+        {% else %}
+            <p class="prediction">Churn Prediction: <strong>{{ 'Yes' if prediction == 1 else 'No' }}</strong></p>
+            <p class="probability">Churn Probability: <strong>{{ '%.2f'|format(probability * 100) }}%</strong></p>
+            <h2>Submitted Data</h2>
+            <ul class="data-list">
+                {% for key, value in data.items() %}
+                    <li><span>{{ key }}:</span> {{ value }}</li>
+                {% endfor %}
+            </ul>
+        {% endif %}
+        <a class="back-link" href="{{ url_for('index') }}">Back</a>
+    </main>
+</body>
+</html>

@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template
 from pyspark.sql import SparkSession
 from pyspark.ml import PipelineModel
 
@@ -30,23 +30,46 @@ print("🔹 Đang load mô hình...")
 model = PipelineModel.load(MODEL_PATH)
 print("✅ Load mô hình thành công!")
 
+# =========================
+# Giao diện nhập dữ liệu
+# =========================
+@app.route("/", methods=["GET"])
+def index():
+    return render_template("index.html")
+
 # ====================================
 # 🚀 API predict
 # ====================================
 @app.route("/predict", methods=["POST"])
 def predict():
     try:
-        data = request.get_json()
+        # Lấy dữ liệu từ form
+        data = {
+            "gender": request.form.get("gender"),
+            "SeniorCitizen": int(request.form.get("SeniorCitizen")),
+            "Partner": request.form.get("Partner"),
+            "Dependents": request.form.get("Dependents"),
+            "tenure": int(request.form.get("tenure")),
+            "PhoneService": request.form.get("PhoneService"),
+            "InternetService": request.form.get("InternetService"),
+            "MonthlyCharges": float(request.form.get("MonthlyCharges")),
+            "TotalCharges": float(request.form.get("TotalCharges"))
+        }
+
+        # Chuyển thành DataFrame Spark
         df = spark.createDataFrame([data])
 
-        result = model.transform(df).collect()[0]
-        return jsonify({
-            "churn_prediction": int(result["prediction"]),
-            "churn_probability": float(result["probability"][1])
-        })
+        # Dự đoán
+        prediction = model.transform(df).collect()[0]
+        label = int(prediction["prediction"])
+        prob = float(prediction["probability"][1])
 
+        return render_template("result.html",
+                               prediction=label,
+                               probability=prob,
+                               data=data)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return render_template("result.html", error=str(e))
 
 @app.route("/health", methods=["GET"])
 def health():

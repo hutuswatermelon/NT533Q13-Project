@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Churn Prediction</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <main class="container">
+        <h1>Customer Churn Prediction</h1>
+        <form method="post" action="{{ url_for('predict') }}">
+            <section>
+                <label for="gender">Gender</label>
+                <select id="gender" name="gender" required>
+                    <option value="" disabled selected>Select...</option>
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
+                </select>
+            </section>
+            <section>
+                <label for="SeniorCitizen">Senior Citizen</label>
+                <select id="SeniorCitizen" name="SeniorCitizen" required>
+                    <option value="" disabled selected>Select...</option>
+                    <option value="0">No</option>
+                    <option value="1">Yes</option>
+                </select>
+            </section>
+            <section>
+                <label for="Partner">Partner</label>
+                <select id="Partner" name="Partner" required>
+                    <option value="" disabled selected>Select...</option>
+                    <option value="Yes">Yes</option>
+                    <option value="No">No</option>
+                </select>
+            </section>
+            <section>
+                <label for="Dependents">Dependents</label>
+                <select id="Dependents" name="Dependents" required>
+                    <option value="" disabled selected>Select...</option>
+                    <option value="Yes">Yes</option>
+                    <option value="No">No</option>
+                </select>
+            </section>
+            <section>
+                <label for="tenure">Tenure (months)</label>
+                <input id="tenure" name="tenure" type="number" min="0" required>
+            </section>
+            <section>
+                <label for="PhoneService">Phone Service</label>
+                <select id="PhoneService" name="PhoneService" required>
+                    <option value="" disabled selected>Select...</option>
+                    <option value="Yes">Yes</option>
+                    <option value="No">No</option>
+                </select>
+            </section>
+            <section>
+                <label for="InternetService">Internet Service</label>
+                <select id="InternetService" name="InternetService" required>
+                    <option value="" disabled selected>Select...</option>
+                    <option value="DSL">DSL</option>
+                    <option value="Fiber optic">Fiber optic</option>
+                    <option value="No">No</option>
+                </select>
+            </section>
+            <section>
+                <label for="MonthlyCharges">Monthly Charges</label>
+                <input id="MonthlyCharges" name="MonthlyCharges" type="number" step="0.01" min="0" required>
+            </section>
+            <section>
+                <label for="TotalCharges">Total Charges</label>
+                <input id="TotalCharges" name="TotalCharges" type="number" step="0.01" min="0" required>
+            </section>
+            <button type="submit">Predict</button>
+        </form>
+    </main>
+</body>
+</html>
