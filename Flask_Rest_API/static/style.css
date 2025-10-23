@@ -18,6 +18,22 @@ body {
     border-radius: 16px;
     box-shadow: 0 20px 45px rgba(15, 23, 42, 0.12);
     width: min(480px, 90vw);
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.card {
+    border: 1px solid #e5e7eb;
+    border-radius: 14px;
+    padding: 1.5rem;
+    background: #ffffff;
+}
+
+.card h2 {
+    margin-top: 0;
+    margin-bottom: 1rem;
+    font-size: 1.2rem;
 }
 
 h1 {
@@ -43,6 +59,13 @@ select {
     border-radius: 10px;
     border: 1px solid #cbd2d9;
     font-size: 1rem;
+}
+
+input[type="file"] {
+    border: 1px dashed #cbd2d9;
+    padding: 0.75rem;
+    border-radius: 10px;
+    background-color: #f8fafc;
 }
 
 button,
@@ -90,4 +113,26 @@ button:hover,
 .data-list span {
     font-weight: 600;
     margin-right: 0.4rem;
+}
+
+.divider {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    color: #6b7280;
+    font-size: 0.85rem;
+}
+
+.divider::before,
+.divider::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background-color: #e5e7eb;
+}
+
+.helper-text {
+    margin-top: 0.5rem;
+    font-size: 0.85rem;
+    color: #6b7280;
 }
