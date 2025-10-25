@@ -205,7 +205,7 @@
             <!-- ===== DOG/CAT CLASSIFICATION MODEL ===== -->
             <div class="model-section {% if selected_model == 'dogcat_lr' %}active{% endif %}" data-model="dogcat_lr">
                 <section class="card">
-                    <h2>Dog vs Cat Classification</h2>
+                    <h2>Single Image Classification</h2>
                     <form method="post" action="{{ url_for('predict_dogcat') }}" enctype="multipart/form-data">
                         <section>
                             <label for="imageFile">Upload Image</label>
@@ -213,6 +213,20 @@
                             <p class="helper-text">Supported: JPG, PNG</p>
                         </section>
                         <button type="submit">Classify</button>
+                    </form>
+                </section>
+
+                <div class="divider"><span>or</span></div>
+
+                <section class="card">
+                    <h2>Batch Classification</h2>
+                    <form method="post" action="{{ url_for('batch_classify_dogcat_route') }}" enctype="multipart/form-data">
+                        <section>
+                            <label for="zipFile">Upload ZIP (multiple images)</label>
+                            <input id="zipFile" name="zip_file" type="file" accept=".zip" required>
+                            <p class="helper-text">ZIP file containing JPG/PNG images</p>
+                        </section>
+                        <button type="submit">Upload & Classify</button>
                     </form>
                 </section>
             </div>

@@ -10,6 +10,8 @@ from pyspark.ml import PipelineModel
 from pyspark.ml.classification import LogisticRegressionModel
 from pyspark.ml.linalg import Vectors
 from pyspark.sql import functions as F
+import zipfile
+from pathlib import Path
 
 app = Flask(__name__)
 
@@ -127,6 +129,77 @@ def classify_dog_cat(image_file):
         "model_type": "dogcat_classification"
     }
 
+def batch_classify_dogcat(zip_file):
+    """Batch classification cho ảnh chó/mèo từ ZIP file"""
+    if not zip_file or zip_file.filename == "":
+        raise ValueError("Please upload a ZIP file.")
+    if not zip_file.filename.lower().endswith(".zip"):
+        raise ValueError("File must be a ZIP archive.")
+    
+    results = []
+    tmp_dir = None
+    
+    try:
+        # Tạo thư mục tạm để giải nén
+        tmp_dir = tempfile.mkdtemp()
+        zip_path = os.path.join(tmp_dir, "images.zip")
+        zip_file.save(zip_path)
+        
+        # Giải nén
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall(tmp_dir)
+        
+        # Lấy tất cả file ảnh
+        image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.gif'}
+        image_files = []
+        for root, dirs, files in os.walk(tmp_dir):
+            for file in files:
+                if Path(file).suffix.lower() in image_extensions:
+                    image_files.append(os.path.join(root, file))
+        
+        if not image_files:
+            raise ValueError("No valid image files found in ZIP.")
+        
+        # Xử lý từng ảnh
+        for img_path in image_files:
+            try:
+                with open(img_path, 'rb') as f:
+                    # Tạo file-like object cho extract_image_features
+                    class FileStorage:
+                        def __init__(self, file_obj, filename):
+                            self.stream = file_obj
+                            self.filename = filename
+                    
+                    file_storage = FileStorage(f, os.path.basename(img_path))
+                    features = extract_image_features(file_storage)
+                    
+                    df = spark.createDataFrame([Row(features_vec=Vectors.dense(features))])
+                    prediction = dogcat_model.transform(df).collect()[0]
+                    
+                    pred_idx = int(prediction["prediction"])
+                    label = dogcat_labels.get(pred_idx, str(pred_idx))
+                    prob = float(prediction["probability"][pred_idx])
+                    
+                    results.append({
+                        "filename": os.path.basename(img_path),
+                        "prediction": label,
+                        "confidence": f"{prob * 100:.2f}%"
+                    })
+            except Exception as e:
+                results.append({
+                    "filename": os.path.basename(img_path),
+                    "prediction": "ERROR",
+                    "confidence": str(e)
+                })
+        
+        return results
+    
+    finally:
+        # Dọn dẹp thư mục tạm
+        if tmp_dir and os.path.exists(tmp_dir):
+            import shutil
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
 # ====================================
 # 🌐 Routes
 # ====================================
@@ -222,6 +295,29 @@ def batch_predict():
 @app.route("/health", methods=["GET"])
 def health():
     return "OK", 200
+
+@app.route("/batch_classify_dogcat", methods=["POST"])
+def batch_classify_dogcat_route():
+    """Route batch classification cho Dog/Cat"""
+    try:
+        zip_file = request.files.get("zip_file")
+        results = batch_classify_dogcat(zip_file)
+        
+        # Tạo CSV kết quả
+        import pandas as pd
+        df_results = pd.DataFrame(results)
+        csv_buffer = io.StringIO()
+        df_results.to_csv(csv_buffer, index=False)
+        csv_buffer.seek(0)
+        
+        return send_file(
+            io.BytesIO(csv_buffer.getvalue().encode("utf-8")),
+            mimetype="text/csv",
+            as_attachment=True,
+            download_name="dogcat_batch_predictions.csv",
+        )
+    except Exception as e:
+        return render_template("result_dogcat.html", error=str(e))
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
