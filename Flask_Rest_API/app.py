@@ -130,7 +130,7 @@ def predict():
                                    prediction=label,
                                    probability=prob,
                                    data=data)
-        if model_name == "dogcat_lr":
+        if model_name == "dogcat_lr_model":
             uploaded_image = request.files.get("image")
             if not uploaded_image or uploaded_image.filename == "":
                 return render_template("result.html", error="Please upload an image.")
@@ -144,7 +144,7 @@ def predict():
             return render_template("result.html",
                                    prediction=label,
                                    probability=prob,
-                                   data={"model": "dogcat_lr"})
+                                   data={"model": "dogcat_lr_model", "filename": uploaded_image.filename})
         return render_template("result.html", error="Unsupported model selected.")
     except Exception as e:
         return render_template("result.html", error=str(e))

@@ -11,8 +11,13 @@
         {% if error %}
             <p class="error">Error: {{ error }}</p>
         {% else %}
-            <p class="prediction">Churn Prediction: <strong>{{ 'Yes' if prediction == 1 else 'No' }}</strong></p>
-            <p class="probability">Churn Probability: <strong>{{ '%.2f'|format(probability * 100) }}%</strong></p>
+            {% if data.get('model') == 'dogcat_lr' %}
+                <p class="prediction">Image Classification: <strong>{{ prediction }}</strong></p>
+                <p class="probability">Confidence: <strong>{{ '%.2f'|format(probability * 100) }}%</strong></p>
+            {% else %}
+                <p class="prediction">Churn Prediction: <strong>{{ 'Yes' if prediction == 1 else 'No' }}</strong></p>
+                <p class="probability">Churn Probability: <strong>{{ '%.2f'|format(probability * 100) }}%</strong></p>
+            {% endif %}
             <h2>Submitted Data</h2>
             <ul class="data-list">
                 {% for key, value in data.items() %}
