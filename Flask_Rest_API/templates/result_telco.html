@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Telco Churn Result</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <main class="container">
+        <h1>📊 Telco Churn Prediction Result</h1>
+        
+        {% if error %}
+            <div class="error-box">
+                <h2>❌ Error</h2>
+                <p>{{ error }}</p>
+            </div>
+        {% else %}
+            <div class="result-box churn-result">
+                <h2>Prediction</h2>
+                <p class="prediction-label">
+                    Customer will 
+                    <strong class="{% if result.prediction == 1 %}churn-yes{% else %}churn-no{% endif %}">
+                        {{ 'CHURN' if result.prediction == 1 else 'STAY' }}
+                    </strong>
+                </p>
+                <p class="probability">Churn Probability: <strong>{{ '%.2f'|format(result.probability * 100) }}%</strong></p>
+            </div>
+
+            <div class="data-box">
+                <h2>Input Data</h2>
+                <ul class="data-list">
+                    {% for key, value in result.input_data.items() %}
+                        <li><span>{{ key }}:</span> {{ value }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        {% endif %}
+        
+        <a class="back-link" href="{{ url_for('index', model='telco_rf') }}">← Back to Dashboard</a>
+    </main>
+</body>
+</html>

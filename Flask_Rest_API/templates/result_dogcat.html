@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Dog/Cat Classification Result</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <main class="container">
+        <h1>🐾 Dog vs Cat Classification Result</h1>
+        
+        {% if error %}
+            <div class="error-box">
+                <h2>❌ Error</h2>
+                <p>{{ error }}</p>
+            </div>
+        {% else %}
+            <div class="result-box image-result">
+                <h2>Classification</h2>
+                <p class="prediction-label">
+                    This is a 
+                    <strong class="animal-label {{ result.prediction|lower }}">
+                        {{ result.prediction|upper }}
+                    </strong>
+                </p>
+                <p class="probability">Confidence: <strong>{{ '%.2f'|format(result.probability * 100) }}%</strong></p>
+            </div>
+
+            <div class="data-box">
+                <h2>Image Info</h2>
+                <ul class="data-list">
+                    <li><span>Filename:</span> {{ result.input_data.filename }}</li>
+                    <li><span>Model:</span> Logistic Regression (ResNet50 features)</li>
+                </ul>
+            </div>
+        {% endif %}
+        
+        <a class="back-link" href="{{ url_for('index', model='dogcat_lr') }}">← Back to Dashboard</a>
+    </main>
+</body>
+</html>

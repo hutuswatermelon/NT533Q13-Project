@@ -159,3 +159,84 @@ button:hover,
     flex-direction: column;
     gap: 1.5rem;
 }
+
+/* Result-specific styles */
+.result-box {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 2rem;
+    border-radius: 14px;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+}
+
+.churn-result {
+    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+}
+
+.image-result {
+    background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+}
+
+.error-box {
+    background: #fee;
+    border: 2px solid #f88;
+    padding: 1.5rem;
+    border-radius: 12px;
+    margin-bottom: 1.5rem;
+}
+
+.prediction-label {
+    font-size: 1.5rem;
+    margin: 1rem 0;
+}
+
+.churn-yes {
+    color: #ff4757;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.churn-no {
+    color: #2ed573;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.animal-label {
+    font-size: 2rem;
+    text-transform: uppercase;
+}
+
+.animal-label.dog {
+    color: #ffd93d;
+}
+
+.animal-label.cat {
+    color: #ff6b9d;
+}
+
+.data-box {
+    background: white;
+    padding: 1.5rem;
+    border-radius: 14px;
+    margin-bottom: 1.5rem;
+}
+
+.data-list {
+    list-style: none;
+    padding: 0;
+}
+
+.data-list li {
+    padding: 0.5rem 0;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.data-list li:last-child {
+    border-bottom: none;
+}
+
+.data-list span {
+    font-weight: 600;
+    color: #6b7280;
+    margin-right: 0.5rem;
+}
