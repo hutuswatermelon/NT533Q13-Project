@@ -1,9 +1,14 @@
 import io
 import os
 import tempfile
+import numpy as np
 from flask import Flask, request, jsonify, render_template, send_file
-from pyspark.sql import SparkSession
+from PIL import Image, ImageFile
+from tensorflow.keras.applications.resnet50 import ResNet50, preprocess_input
+from pyspark.sql import SparkSession, Row
 from pyspark.ml import PipelineModel
+from pyspark.ml.classification import LogisticRegressionModel
+from pyspark.ml.linalg import Vectors
 from pyspark.sql import functions as F
 
 app = Flask(__name__)
@@ -28,10 +33,22 @@ spark = (
 # ====================================
 # 📦 Load model từ GCS
 # ====================================
-MODEL_PATH = "gs://nt533q13-spark-data/models/telco_rf"
-
+ImageFile.LOAD_TRUNCATED_IMAGES = True
+TELCO_MODEL_PATH = "gs://nt533q13-spark-data/models/telco_rf"
+DOGCAT_MODEL_PATH = "gs://nt533q13-spark-data/models/dogcat_lr_model"
+DOGCAT_LABEL_PATH = "gs://nt533q13-spark-data/models/dogcat_lr_labels"
+AVAILABLE_MODELS = [
+    {"id": "telco_rf", "name": "Random Forest (Telco)"},
+    {"id": "dogcat_lr", "name": "Logistic Regression (Dog vs Cat)"},
+]
 print("🔹 Đang load mô hình...")
-model = PipelineModel.load(MODEL_PATH)
+telco_model = PipelineModel.load(TELCO_MODEL_PATH)
+dogcat_model = LogisticRegressionModel.load(DOGCAT_MODEL_PATH)
+resnet_model = ResNet50(weights="imagenet", include_top=False, pooling="avg")
+dogcat_labels = {
+    int(row["index"]): row["label"]
+    for row in spark.read.json(DOGCAT_LABEL_PATH).collect()
+}
 print("✅ Load mô hình thành công!")
 
 REQUIRED_COLUMNS = [
@@ -62,13 +79,10 @@ REQUIRED_COLUMNS = [
 # =========================
 @app.route("/", methods=["GET"])
 def index():
-    available_models = [
-        {"id": "telco_rf", "name": "Random Forest (Telco)"},
-    ]
-    selected_model = request.args.get("model", available_models[0]["id"])
+    selected_model = request.args.get("model", AVAILABLE_MODELS[0]["id"])
     return render_template(
         "index.html",
-        models=available_models,
+        models=AVAILABLE_MODELS,
         selected_model=selected_model,
         required_columns=REQUIRED_COLUMNS,
     )
@@ -78,42 +92,60 @@ def index():
 # ====================================
 @app.route("/predict", methods=["POST"])
 def predict():
+    model_name = request.form.get("model_name", "telco_rf")
     try:
-        # Lấy dữ liệu từ form
-        data = {
-            "customerID": request.form.get("customerID"),
-            "gender": request.form.get("gender"),
-            "SeniorCitizen": int(request.form.get("SeniorCitizen")),
-            "Partner": request.form.get("Partner"),
-            "Dependents": request.form.get("Dependents"),
-            "tenure": int(request.form.get("tenure")),
-            "PhoneService": request.form.get("PhoneService"),
-            "MultipleLines": request.form.get("MultipleLines"),
-            "InternetService": request.form.get("InternetService"),
-            "OnlineSecurity": request.form.get("OnlineSecurity"),
-            "OnlineBackup": request.form.get("OnlineBackup"),
-            "DeviceProtection": request.form.get("DeviceProtection"),
-            "TechSupport": request.form.get("TechSupport"),
-            "StreamingTV": request.form.get("StreamingTV"),
-            "StreamingMovies": request.form.get("StreamingMovies"),
-            "Contract": request.form.get("Contract"),
-            "PaperlessBilling": request.form.get("PaperlessBilling"),
-            "PaymentMethod": request.form.get("PaymentMethod"),
-            "MonthlyCharges": float(request.form.get("MonthlyCharges")),
-            "TotalCharges": float(request.form.get("TotalCharges"))
-        }
-        data_for_model = {k: v for k, v in data.items() if k != "customerID"}
-        df = spark.createDataFrame([data_for_model])
+        if model_name == "telco_rf":
+            # Lấy dữ liệu từ form
+            data = {
+                "customerID": request.form.get("customerID"),
+                "gender": request.form.get("gender"),
+                "SeniorCitizen": int(request.form.get("SeniorCitizen")),
+                "Partner": request.form.get("Partner"),
+                "Dependents": request.form.get("Dependents"),
+                "tenure": int(request.form.get("tenure")),
+                "PhoneService": request.form.get("PhoneService"),
+                "MultipleLines": request.form.get("MultipleLines"),
+                "InternetService": request.form.get("InternetService"),
+                "OnlineSecurity": request.form.get("OnlineSecurity"),
+                "OnlineBackup": request.form.get("OnlineBackup"),
+                "DeviceProtection": request.form.get("DeviceProtection"),
+                "TechSupport": request.form.get("TechSupport"),
+                "StreamingTV": request.form.get("StreamingTV"),
+                "StreamingMovies": request.form.get("StreamingMovies"),
+                "Contract": request.form.get("Contract"),
+                "PaperlessBilling": request.form.get("PaperlessBilling"),
+                "PaymentMethod": request.form.get("PaymentMethod"),
+                "MonthlyCharges": float(request.form.get("MonthlyCharges")),
+                "TotalCharges": float(request.form.get("TotalCharges"))
+            }
+            data_for_model = {k: v for k, v in data.items() if k != "customerID"}
+            df = spark.createDataFrame([data_for_model])
 
-        # Dự đoán
-        prediction = model.transform(df).collect()[0]
-        label = int(prediction["prediction"])
-        prob = float(prediction["probability"][1])
+            # Dự đoán
+            prediction = telco_model.transform(df).collect()[0]
+            label = int(prediction["prediction"])
+            prob = float(prediction["probability"][1])
 
-        return render_template("result.html",
-                               prediction=label,
-                               probability=prob,
-                               data=data)
+            return render_template("result.html",
+                                   prediction=label,
+                                   probability=prob,
+                                   data=data)
+        if model_name == "dogcat_lr":
+            uploaded_image = request.files.get("image")
+            if not uploaded_image or uploaded_image.filename == "":
+                return render_template("result.html", error="Please upload an image.")
+            features = extract_image_features(uploaded_image)
+            df = spark.createDataFrame([Row(features_vec=Vectors.dense(features))])
+            prediction = dogcat_model.transform(df).collect()[0]
+            pred_idx = int(prediction["prediction"])
+            label = dogcat_labels.get(pred_idx, str(pred_idx))
+            prob_vector = prediction["probability"]
+            prob = float(prob_vector[pred_idx])
+            return render_template("result.html",
+                                   prediction=label,
+                                   probability=prob,
+                                   data={"model": "dogcat_lr"})
+        return render_template("result.html", error="Unsupported model selected.")
     except Exception as e:
         return render_template("result.html", error=str(e))
 
@@ -123,6 +155,9 @@ def health():
 
 @app.route("/batch_predict", methods=["POST"])
 def batch_predict():
+    model_name = request.form.get("model_name", "telco_rf")
+    if model_name != "telco_rf":
+        return render_template("result.html", error="Batch prediction chỉ hỗ trợ mô hình Telco.")
     uploaded_file = request.files.get("file")
     if not uploaded_file or uploaded_file.filename == "":
         return render_template("result.html", error="No CSV file provided.")
@@ -155,7 +190,7 @@ def batch_predict():
 
         df_with_id = df.withColumn("row_id", F.monotonically_increasing_id())
         features_df = df_with_id.drop("customerID")
-        predictions = model.transform(features_df)
+        predictions = telco_model.transform(features_df)
 
         result_df = (
             predictions
@@ -180,6 +215,14 @@ def batch_predict():
     finally:
         if tmp_path and os.path.exists(tmp_path):
             os.remove(tmp_path)
+
+def extract_image_features(file_storage):
+    image = Image.open(file_storage.stream).convert("RGB").resize((224, 224))
+    array = np.asarray(image).astype("float32")
+    array = np.expand_dims(array, axis=0)
+    array = preprocess_input(array)
+    features = resnet_model.predict(array, verbose=0)
+    return features.flatten().astype("float32")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)

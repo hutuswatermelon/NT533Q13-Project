@@ -1,7 +1,7 @@
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, pandas_udf, split, element_at, udf
 from pyspark.sql.types import ArrayType, FloatType
-import io, os
+import io
 import numpy as np
 import pandas as pd
 from PIL import Image, ImageFile
@@ -44,20 +44,14 @@ def _to_bytes(x):
         except Exception:
             return None
 
-def _open_image_from_any(content, origin_path):
+def _open_image_from_any(content, _origin_path):
     if content is not None:
         b = _to_bytes(content)
         if b:
             try:
                 return Image.open(io.BytesIO(b)).convert("RGB").resize((224, 224))
             except Exception:
-                pass
-    local_path = origin_path.replace("file://", "") if origin_path else None
-    if local_path:
-        try:
-            return Image.open(local_path).convert("RGB").resize((224, 224))
-        except Exception:
-            return None
+                return None
     return None
 
 # ====== 5. UDF trích xuất đặc trưng ======
@@ -92,7 +86,8 @@ feature_vector_df = feature_df.withColumn("features_vec", to_vector_udf(col("fea
 print("🔧 Bắt đầu huấn luyện mô hình Logistic Regression...")
 
 indexer = StringIndexer(inputCol="label", outputCol="labelIndex")
-data_indexed = indexer.fit(feature_vector_df).transform(feature_vector_df)
+indexer_model = indexer.fit(feature_vector_df)
+data_indexed = indexer_model.transform(feature_vector_df)
 
 train_df, test_df = data_indexed.randomSplit([0.8, 0.2], seed=42)
 
@@ -111,15 +106,21 @@ accuracy = evaluator.evaluate(predictions)
 
 # In ra kết quả và lưu file
 print(f"\n🎯 Độ chính xác mô hình trên tập test: {accuracy:.4f}")
-with open("train_result.txt", "w") as f:
-    f.write(f"🎯 Độ chính xác mô hình trên tập test: {accuracy:.4f}\n")
-print("📁 Kết quả đã được lưu vào: train_result.txt")
-
-# ====== 10. Lưu mô hình ======
-# os.makedirs("models", exist_ok=True)
-# lr_model.write().overwrite().save("models/dogcat_lr_model")
-lr_model.write().overwrite().save("gs://nt533q13-spark-data/models/dogcat_lr_model")
-print("✅ Mô hình đã lưu tại: gs://nt533q13-spark-data/models/dogcat_lr_model")
+RESULTS_DIR = "gs://nt533q13-spark-data/models/dogcat_lr_metrics"
+MODEL_DIR = "gs://nt533q13-spark-data/models/dogcat_lr_model"
+LABELS_DIR = "gs://nt533q13-spark-data/models/dogcat_lr_labels"
+metrics_df = spark.createDataFrame(
+    [(float(accuracy),)],
+    ["accuracy"]
+)
+metrics_df.coalesce(1).write.mode("overwrite").json(RESULTS_DIR)
+label_df = spark.createDataFrame(
+    [(int(idx), label) for idx, label in enumerate(indexer_model.labels)],
+    ["index", "label"]
+)
+label_df.coalesce(1).write.mode("overwrite").json(LABELS_DIR)
+lr_model.write().overwrite().save(MODEL_DIR)
+print(f"✅ Mô hình đã lưu tại: {MODEL_DIR}")
 
 spark.stop()
 

@@ -150,3 +150,12 @@ button:hover,
     font-size: 0.85rem;
     color: #6b7280;
 }
+
+.model-section {
+    display: none;
+}
+.model-section.active {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
