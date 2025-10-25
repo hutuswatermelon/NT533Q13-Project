@@ -1,0 +1,7 @@
+pyspark
+tensorflow-cpu
+pillow
+numpy
+pandas
+pyarrow
+google-cloud-storage

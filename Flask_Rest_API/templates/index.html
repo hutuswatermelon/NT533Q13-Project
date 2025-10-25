@@ -205,7 +205,7 @@
 
             <div class="model-section {% if selected_model == 'dogcat_lr' %}active{% endif %}" data-model="dogcat_lr">
                 <section class="card">
-                    <h2>Dog vs Cat prediction</h2>
+                    <h2>Dog vs Cat Classification</h2>
                     <form method="post" action="{{ url_for('predict') }}" enctype="multipart/form-data">
                         <input type="hidden" name="model_name" value="dogcat_lr" id="imageModel">
                         <section>
@@ -213,7 +213,7 @@
                             <input id="imageFile" name="image" type="file" accept="image/*" required>
                             <p class="helper-text">Supported formats: JPG, PNG.</p>
                         </section>
-                        <button type="submit">Predict</button>
+                        <button type="submit">Classification</button>
                     </form>
                 </section>
             </div>
