@@ -129,76 +129,89 @@ def classify_dog_cat(image_file):
         "model_type": "dogcat_classification"
     }
 
-def batch_classify_dogcat(zip_file):
-    """Batch classification cho ảnh chó/mèo từ ZIP file"""
+def batch_classify_dogcat(zip_file, batch_size=32):
+    """Batch classification cho ảnh chó/mèo từ ZIP file (tối ưu bằng batch predict)"""
     if not zip_file or zip_file.filename == "":
         raise ValueError("Please upload a ZIP file.")
     if not zip_file.filename.lower().endswith(".zip"):
         raise ValueError("File must be a ZIP archive.")
-    
+
     results = []
     tmp_dir = None
-    
+
     try:
         # Tạo thư mục tạm để giải nén
         tmp_dir = tempfile.mkdtemp()
         zip_path = os.path.join(tmp_dir, "images.zip")
         zip_file.save(zip_path)
-        
+
         # Giải nén
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+        with zipfile.ZipFile(zip_path, "r") as zip_ref:
             zip_ref.extractall(tmp_dir)
-        
+
         # Lấy tất cả file ảnh
-        image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.gif'}
-        image_files = []
-        for root, dirs, files in os.walk(tmp_dir):
-            for file in files:
-                if Path(file).suffix.lower() in image_extensions:
-                    image_files.append(os.path.join(root, file))
-        
-        if not image_files:
+        image_extensions = {".jpg", ".jpeg", ".png", ".bmp", ".gif"}
+        image_paths = [
+            os.path.join(root, file)
+            for root, dirs, files in os.walk(tmp_dir)
+            for file in files
+            if Path(file).suffix.lower() in image_extensions
+        ]
+
+        if not image_paths:
             raise ValueError("No valid image files found in ZIP.")
-        
-        # Xử lý từng ảnh
-        for img_path in image_files:
-            try:
-                with open(img_path, 'rb') as f:
-                    # Tạo file-like object cho extract_image_features
-                    class FileStorage:
-                        def __init__(self, file_obj, filename):
-                            self.stream = file_obj
-                            self.filename = filename
-                    
-                    file_storage = FileStorage(f, os.path.basename(img_path))
-                    features = extract_image_features(file_storage)
-                    
-                    df = spark.createDataFrame([Row(features_vec=Vectors.dense(features))])
-                    prediction = dogcat_model.transform(df).collect()[0]
-                    
-                    pred_idx = int(prediction["prediction"])
-                    label = dogcat_labels.get(pred_idx, str(pred_idx))
-                    prob = float(prediction["probability"][pred_idx])
-                    
+
+        # Tách từng batch
+        for i in range(0, len(image_paths), batch_size):
+            batch_paths = image_paths[i : i + batch_size]
+            batch_arrays = []
+            filenames = []
+
+            # Chuẩn bị batch array
+            for img_path in batch_paths:
+                try:
+                    image = Image.open(img_path).convert("RGB").resize((224, 224))
+                    array = np.asarray(image).astype("float32")
+                    array = np.expand_dims(array, axis=0)
+                    array = preprocess_input(array)
+                    batch_arrays.append(array)
+                    filenames.append(os.path.basename(img_path))
+                except Exception as e:
                     results.append({
                         "filename": os.path.basename(img_path),
-                        "prediction": label,
-                        "confidence": f"{prob * 100:.2f}%"
+                        "prediction": "ERROR",
+                        "confidence": str(e),
                     })
-            except Exception as e:
+
+            if not batch_arrays:
+                continue
+
+            batch_input = np.vstack(batch_arrays)
+            # Batch predict với ResNet50
+            batch_features = resnet_model.predict(batch_input, verbose=0)
+
+            # Chuyển sang Spark DataFrame và dự đoán
+            for feat, fname in zip(batch_features, filenames):
+                df = spark.createDataFrame([Row(features_vec=Vectors.dense(feat))])
+                prediction = dogcat_model.transform(df).collect()[0]
+                pred_idx = int(prediction["prediction"])
+                label = dogcat_labels.get(pred_idx, str(pred_idx))
+                prob = float(prediction["probability"][pred_idx])
+
                 results.append({
-                    "filename": os.path.basename(img_path),
-                    "prediction": "ERROR",
-                    "confidence": str(e)
+                    "filename": fname,
+                    "prediction": label,
+                    "confidence": f"{prob * 100:.2f}%",
                 })
-        
+
         return results
-    
+
     finally:
         # Dọn dẹp thư mục tạm
         if tmp_dir and os.path.exists(tmp_dir):
             import shutil
             shutil.rmtree(tmp_dir, ignore_errors=True)
+
 
 # ====================================
 # 🌐 Routes
