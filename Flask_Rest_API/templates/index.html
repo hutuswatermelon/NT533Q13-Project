@@ -191,7 +191,7 @@
 
                 <section class="card">
                     <h2>Batch Prediction</h2>
-                    <form method="post" action="{{ url_for('batch_predict') }}" enctype="multipart/form-data">
+                    <form method="post" action="{{ url_for('batch_predict_telco_csv') }}" enctype="multipart/form-data">
                         <section>
                             <label for="csvFile">Upload CSV</label>
                             <input id="csvFile" name="file" type="file" accept=".csv" required>

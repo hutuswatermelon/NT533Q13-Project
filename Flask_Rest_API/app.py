@@ -197,6 +197,101 @@ def get_or_create_actor_pool(target_workers: int) -> List[ray.actor.ActorHandle]
 
 
 # ==============================
+# 📦 Batch dog/cat async processing
+# ==============================
+
+
+@dataclass
+class BatchJob:
+    job_id: str
+    zip_path: Path
+    batch_size: int
+    status: str = "pending"
+    result_path: Optional[Path] = None
+    error: Optional[str] = None
+
+
+JOB_STORAGE_DIR = Path(tempfile.gettempdir()) / "dogcat_batch_jobs"
+JOB_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+
+_job_registry: Dict[str, BatchJob] = {}
+_job_registry_lock = Lock()
+_job_queue: Queue = Queue()
+DOGCAT_ACTOR_TARGET = int(os.getenv("DOGCAT_ACTOR_TARGET", "4"))
+
+
+def _process_dogcat_batch_job(job: BatchJob) -> None:
+    job_dir = job.zip_path.parent
+    extract_dir = job_dir / "extracted"
+    try:
+        with zipfile.ZipFile(job.zip_path, "r") as zip_ref:
+            zip_ref.extractall(extract_dir)
+
+        image_exts = {".jpg", ".jpeg", ".png", ".bmp", ".gif"}
+        image_paths = [
+            os.path.join(root, f)
+            for root, _, files in os.walk(extract_dir)
+            for f in files
+            if Path(f).suffix.lower() in image_exts
+        ]
+        if not image_paths:
+            raise ValueError("No valid image files found in ZIP.")
+
+        pool = get_or_create_actor_pool(target_workers=DOGCAT_ACTOR_TARGET)
+        batches = [
+            image_paths[i:i + job.batch_size]
+            for i in range(0, len(image_paths), job.batch_size)
+        ]
+
+        futures = []
+        for idx, batch in enumerate(batches):
+            actor = pool[idx % len(pool)]
+            futures.append(actor.process_batch.remote(batch))
+
+        all_results = []
+        for partial in ray.get(futures):
+            all_results.extend(partial)
+
+        import pandas as pd
+
+        result_path = job_dir / "dogcat_batch_predictions.csv"
+        pd.DataFrame(all_results).to_csv(result_path, index=False)
+
+        with _job_registry_lock:
+            job.status = "completed"
+            job.result_path = result_path
+    except Exception as exc:
+        with _job_registry_lock:
+            job.status = "failed"
+            job.error = str(exc)
+    finally:
+        shutil.rmtree(extract_dir, ignore_errors=True)
+
+
+def _batch_worker_loop() -> None:
+    while True:
+        job_id = _job_queue.get()
+        try:
+            with _job_registry_lock:
+                job = _job_registry.get(job_id)
+                if job:
+                    job.status = "processing"
+            if not job:
+                continue
+            _process_dogcat_batch_job(job)
+        finally:
+            _job_queue.task_done()
+
+
+def _start_batch_workers(count: int = 1) -> None:
+    for _ in range(count):
+        Thread(target=_batch_worker_loop, daemon=True).start()
+
+
+_start_batch_workers(int(os.getenv("DOGCAT_BATCH_WORKERS", "1")))
+
+
+# ==============================
 # 🧰 Helper
 # ==============================
 def extract_image_features_resnet(file_storage):
@@ -341,10 +436,6 @@ def batch_classify_dogcat_route():
         return jsonify({"task_id": job_id, "status": job.status}), 202
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-    finally:
-        if 'tmp_dir' in locals() and os.path.exists(tmp_dir):
-            import shutil
-            shutil.rmtree(tmp_dir, ignore_errors=True)
 
 @app.route("/batch_predict", methods=["POST"])
 def batch_predict_telco_csv():
@@ -438,99 +529,6 @@ def warmup_background():
 Thread(target=warmup_background, daemon=True).start()
 
 
-if __name__ == "__main__":
-    # Chạy trực tiếp (dev). Prod dùng gunicorn.
-    app.run(host="0.0.0.0", port=8080)
-
-@dataclass
-class BatchJob:
-    job_id: str
-    zip_path: Path
-    batch_size: int
-    status: str = "pending"
-    result_path: Optional[Path] = None
-    error: Optional[str] = None
-
-
-JOB_STORAGE_DIR = Path(tempfile.gettempdir()) / "dogcat_batch_jobs"
-JOB_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
-
-_job_registry: Dict[str, BatchJob] = {}
-_job_registry_lock = Lock()
-_job_queue: Queue = Queue()
-DOGCAT_ACTOR_TARGET = int(os.getenv("DOGCAT_ACTOR_TARGET", "4"))
-
-
-def _process_dogcat_batch_job(job: BatchJob) -> None:
-    job_dir = job.zip_path.parent
-    extract_dir = job_dir / "extracted"
-    try:
-        with zipfile.ZipFile(job.zip_path, "r") as zip_ref:
-            zip_ref.extractall(extract_dir)
-
-        image_exts = {".jpg", ".jpeg", ".png", ".bmp", ".gif"}
-        image_paths = [
-            os.path.join(root, f)
-            for root, _, files in os.walk(extract_dir)
-            for f in files
-            if Path(f).suffix.lower() in image_exts
-        ]
-        if not image_paths:
-            raise ValueError("No valid image files found in ZIP.")
-
-        pool = get_or_create_actor_pool(target_workers=DOGCAT_ACTOR_TARGET)
-        batches = [
-            image_paths[i:i + job.batch_size]
-            for i in range(0, len(image_paths), job.batch_size)
-        ]
-
-        futures = []
-        for idx, batch in enumerate(batches):
-            actor = pool[idx % len(pool)]
-            futures.append(actor.process_batch.remote(batch))
-
-        all_results = []
-        for partial in ray.get(futures):
-            all_results.extend(partial)
-
-        import pandas as pd
-
-        result_path = job_dir / "dogcat_batch_predictions.csv"
-        pd.DataFrame(all_results).to_csv(result_path, index=False)
-
-        with _job_registry_lock:
-            job.status = "completed"
-            job.result_path = result_path
-    except Exception as exc:
-        with _job_registry_lock:
-            job.status = "failed"
-            job.error = str(exc)
-    finally:
-        shutil.rmtree(extract_dir, ignore_errors=True)
-
-
-def _batch_worker_loop() -> None:
-    while True:
-        job_id = _job_queue.get()
-        try:
-            with _job_registry_lock:
-                job = _job_registry.get(job_id)
-                if job:
-                    job.status = "processing"
-            if not job:
-                continue
-            _process_dogcat_batch_job(job)
-        finally:
-            _job_queue.task_done()
-
-
-def _start_batch_workers(count: int = 1) -> None:
-    for _ in range(count):
-        Thread(target=_batch_worker_loop, daemon=True).start()
-
-
-_start_batch_workers(int(os.getenv("DOGCAT_BATCH_WORKERS", "1")))
-
 @app.route("/batch_classify_dogcat/<task_id>", methods=["GET"])
 def batch_classify_dogcat_status(task_id: str):
     with _job_registry_lock:
@@ -561,3 +559,8 @@ def download_batch_dogcat_result(task_id: str):
         as_attachment=True,
         download_name=f"{task_id}_predictions.csv",
     )
+
+
+if __name__ == "__main__":
+    # Chạy trực tiếp (dev). Prod dùng gunicorn.
+    app.run(host="0.0.0.0", port=8080)
