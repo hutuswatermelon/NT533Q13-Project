@@ -2,13 +2,17 @@ import io
 import os
 import tempfile
 import zipfile
+import uuid
+import shutil
+from dataclasses import dataclass
 from pathlib import Path
-from threading import Thread
-from typing import List, Dict, Any
+from queue import Queue
+from threading import Thread, Lock
+from typing import List, Dict, Any, Optional
 
 import numpy as np
 from PIL import Image, ImageFile
-from flask import Flask, request, render_template, send_file
+from flask import Flask, request, render_template, send_file, jsonify, url_for
 from pyspark.sql import SparkSession, Row
 from pyspark.ml import PipelineModel
 from pyspark.ml.classification import LogisticRegressionModel
@@ -307,66 +311,36 @@ def predict_dogcat():
 
 @app.route("/batch_classify_dogcat", methods=["POST"])
 def batch_classify_dogcat_route():
-    """
-    ZIP ảnh -> giải nén -> chia batch -> phân tán qua Ray Actor pool -> gom kết quả -> trả CSV
-    """
     try:
         zip_file = request.files.get("zip_file")
         if not zip_file or zip_file.filename == "":
-            return render_template("result_dogcat.html", error="Please upload a ZIP file.")
+            return jsonify({"error": "Please upload a ZIP file."}), 400
         if not zip_file.filename.lower().endswith(".zip"):
-            return render_template("result_dogcat.html", error="File must be a ZIP archive.")
+            return jsonify({"error": "File must be a ZIP archive."}), 400
 
-        tmp_dir = tempfile.mkdtemp()
-        zip_path = os.path.join(tmp_dir, "images.zip")
+        batch_size_value = request.form.get("batch_size") or request.args.get("batch_size")
+        try:
+            batch_size = int(batch_size_value) if batch_size_value else 100
+        except ValueError:
+            return jsonify({"error": "batch_size must be an integer."}), 400
+        if batch_size <= 0:
+            return jsonify({"error": "batch_size must be greater than zero."}), 400
+
+        job_id = uuid.uuid4().hex
+        job_dir = JOB_STORAGE_DIR / job_id
+        job_dir.mkdir(parents=True, exist_ok=True)
+
+        zip_path = job_dir / "images.zip"
         zip_file.save(zip_path)
 
-        with zipfile.ZipFile(zip_path, "r") as zip_ref:
-            zip_ref.extractall(tmp_dir)
+        job = BatchJob(job_id=job_id, zip_path=zip_path, batch_size=batch_size)
+        with _job_registry_lock:
+            _job_registry[job_id] = job
+        _job_queue.put(job_id)
 
-        image_exts = {".jpg", ".jpeg", ".png", ".bmp", ".gif"}
-        image_paths = [
-            os.path.join(root, f)
-            for root, _, files in os.walk(tmp_dir)
-            for f in files
-            if Path(f).suffix.lower() in image_exts
-        ]
-        if not image_paths:
-            return render_template("result_dogcat.html", error="No valid image files found in ZIP.")
-
-        # Tạo pool actor (1 lần)
-        # Ví dụ dùng min(4, CPU) actor — có thể điều chỉnh theo cluster
-        pool = get_or_create_actor_pool(target_workers=4)
-
-        # Chia batch 100 ảnh
-        batch_size = int(request.args.get("batch_size", 100))
-        batches = [image_paths[i:i + batch_size] for i in range(0, len(image_paths), batch_size)]
-
-        # Gửi công việc (round-robin actors)
-        futures = []
-        for i, b in enumerate(batches):
-            actor = pool[i % len(pool)]
-            futures.append(actor.process_batch.remote(b))
-
-        # Thu kết quả
-        all_results = []
-        for partial in ray.get(futures):
-            all_results.extend(partial)
-
-        # Xuất CSV
-        import pandas as pd
-        csv_buffer = io.StringIO()
-        pd.DataFrame(all_results).to_csv(csv_buffer, index=False)
-        csv_buffer.seek(0)
-
-        return send_file(
-            io.BytesIO(csv_buffer.getvalue().encode("utf-8")),
-            mimetype="text/csv",
-            as_attachment=True,
-            download_name="dogcat_batch_predictions.csv",
-        )
+        return jsonify({"task_id": job_id, "status": job.status}), 202
     except Exception as e:
-        return render_template("result_dogcat.html", error=str(e))
+        return jsonify({"error": str(e)}), 500
     finally:
         if 'tmp_dir' in locals() and os.path.exists(tmp_dir):
             import shutil
@@ -467,3 +441,123 @@ Thread(target=warmup_background, daemon=True).start()
 if __name__ == "__main__":
     # Chạy trực tiếp (dev). Prod dùng gunicorn.
     app.run(host="0.0.0.0", port=8080)
+
+@dataclass
+class BatchJob:
+    job_id: str
+    zip_path: Path
+    batch_size: int
+    status: str = "pending"
+    result_path: Optional[Path] = None
+    error: Optional[str] = None
+
+
+JOB_STORAGE_DIR = Path(tempfile.gettempdir()) / "dogcat_batch_jobs"
+JOB_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+
+_job_registry: Dict[str, BatchJob] = {}
+_job_registry_lock = Lock()
+_job_queue: Queue = Queue()
+DOGCAT_ACTOR_TARGET = int(os.getenv("DOGCAT_ACTOR_TARGET", "4"))
+
+
+def _process_dogcat_batch_job(job: BatchJob) -> None:
+    job_dir = job.zip_path.parent
+    extract_dir = job_dir / "extracted"
+    try:
+        with zipfile.ZipFile(job.zip_path, "r") as zip_ref:
+            zip_ref.extractall(extract_dir)
+
+        image_exts = {".jpg", ".jpeg", ".png", ".bmp", ".gif"}
+        image_paths = [
+            os.path.join(root, f)
+            for root, _, files in os.walk(extract_dir)
+            for f in files
+            if Path(f).suffix.lower() in image_exts
+        ]
+        if not image_paths:
+            raise ValueError("No valid image files found in ZIP.")
+
+        pool = get_or_create_actor_pool(target_workers=DOGCAT_ACTOR_TARGET)
+        batches = [
+            image_paths[i:i + job.batch_size]
+            for i in range(0, len(image_paths), job.batch_size)
+        ]
+
+        futures = []
+        for idx, batch in enumerate(batches):
+            actor = pool[idx % len(pool)]
+            futures.append(actor.process_batch.remote(batch))
+
+        all_results = []
+        for partial in ray.get(futures):
+            all_results.extend(partial)
+
+        import pandas as pd
+
+        result_path = job_dir / "dogcat_batch_predictions.csv"
+        pd.DataFrame(all_results).to_csv(result_path, index=False)
+
+        with _job_registry_lock:
+            job.status = "completed"
+            job.result_path = result_path
+    except Exception as exc:
+        with _job_registry_lock:
+            job.status = "failed"
+            job.error = str(exc)
+    finally:
+        shutil.rmtree(extract_dir, ignore_errors=True)
+
+
+def _batch_worker_loop() -> None:
+    while True:
+        job_id = _job_queue.get()
+        try:
+            with _job_registry_lock:
+                job = _job_registry.get(job_id)
+                if job:
+                    job.status = "processing"
+            if not job:
+                continue
+            _process_dogcat_batch_job(job)
+        finally:
+            _job_queue.task_done()
+
+
+def _start_batch_workers(count: int = 1) -> None:
+    for _ in range(count):
+        Thread(target=_batch_worker_loop, daemon=True).start()
+
+
+_start_batch_workers(int(os.getenv("DOGCAT_BATCH_WORKERS", "1")))
+
+@app.route("/batch_classify_dogcat/<task_id>", methods=["GET"])
+def batch_classify_dogcat_status(task_id: str):
+    with _job_registry_lock:
+        job = _job_registry.get(task_id)
+    if not job:
+        return jsonify({"error": "Task not found."}), 404
+
+    response = {"task_id": job.job_id, "status": job.status}
+    if job.status == "completed" and job.result_path:
+        response["download_url"] = url_for("download_batch_dogcat_result", task_id=job.job_id, _external=True)
+    if job.status == "failed" and job.error:
+        response["error"] = job.error
+    return jsonify(response), 200
+
+
+@app.route("/batch_classify_dogcat/<task_id>/result", methods=["GET"])
+def download_batch_dogcat_result(task_id: str):
+    with _job_registry_lock:
+        job = _job_registry.get(task_id)
+    if not job:
+        return jsonify({"error": "Task not found."}), 404
+    if job.status != "completed" or not job.result_path:
+        return jsonify({"error": "Task not completed."}), 409
+
+    return send_file(
+        job.result_path,
+        mimetype="text/csv",
+        as_attachment=True,
+        download_name=f"{task_id}_predictions.csv",
+    )
