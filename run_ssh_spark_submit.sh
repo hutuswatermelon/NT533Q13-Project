@@ -2,37 +2,75 @@
 PROJECT_ID="nt533q13-distributed-ml"
 ZONE="asia-southeast1-a"
 ZK_NODES="10.10.0.2:2181,10.10.0.3:2181,10.10.0.4:2181"
+MASTERS=(spark-master-1 spark-master-2 spark-master-3)
+declare -A MASTER_IP_MAP=(
+  [spark-master-1]=10.10.0.2
+  [spark-master-2]=10.10.0.3
+  [spark-master-3]=10.10.0.4
+)
 
-echo "🔍 Đang truy vấn master_status từ ZooKeeper..."
-RAW_OUTPUT=$(gcloud compute ssh spark-master-1 --project=$PROJECT_ID --zone=$ZONE \
-  --command "sudo /opt/zookeeper/bin/zkCli.sh -server $ZK_NODES get /spark/master_status" 2>/dev/null)
+echo "🔍 Đang xác định Spark master đang ở trạng thái ALIVE..."
+ACTIVE_VM=""
+ACTIVE_URL=""
 
-MASTER_IP=$(echo "$RAW_OUTPUT" | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | tail -n1)
+for VM in "${MASTERS[@]}"; do
+  echo "   → Kiểm tra $VM ..."
+  REMOTE_OUTPUT=$(gcloud compute ssh "$VM" --project="$PROJECT_ID" --zone="$ZONE" \
+    --command "python3 - <<'PY'
+import json
+import urllib.request
 
-if [ -z "$MASTER_IP" ]; then
-  echo "❌ Không xác định được master đang active!"
-  echo "Output từ ZooKeeper:"
-  echo "$RAW_OUTPUT"
+try:
+    with urllib.request.urlopen('http://localhost:8080/json/', timeout=2) as resp:
+        data = json.load(resp)
+    if data.get('status') == 'ALIVE':
+        print(data.get('url', ''))
+except Exception:
+    pass
+PY" 2>/dev/null)
+
+  ACTIVE_URL=$(echo "$REMOTE_OUTPUT" | grep -Eo 'spark://[^[:space:]]+' | head -n1)
+  if [[ -n "$ACTIVE_URL" ]]; then
+    ACTIVE_VM="$VM"
+    break
+  fi
+done
+
+if [[ -z "$ACTIVE_VM" ]]; then
+  echo "❌ Không xác định được master đang active! Vui lòng kiểm tra lại cụm."
   exit 1
 fi
 
-echo "✅ Master hiện tại: $MASTER_IP"
+MASTER_HOST=$(echo "$ACTIVE_URL" | sed -n 's@.*//\([^:]*\):.*@\1@p')
+if [[ -z "$MASTER_HOST" ]]; then
+  MASTER_HOST="$ACTIVE_VM"
+fi
 
-# Map IP → tên VM
-if [[ "$MASTER_IP" == "10.10.0.2" ]]; then
-  MASTER_VM="spark-master-1"
-elif [[ "$MASTER_IP" == "10.10.0.3" ]]; then
-  MASTER_VM="spark-master-2"
-elif [[ "$MASTER_IP" == "10.10.0.4" ]]; then
-  MASTER_VM="spark-master-3"
+if [[ "$MASTER_HOST" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+  MASTER_IP="$MASTER_HOST"
 else
-  echo "⚠️ IP $MASTER_IP không khớp VM nào đã biết!"
+  MASTER_IP="${MASTER_IP_MAP[$MASTER_HOST]}"
+fi
+
+if [[ -z "$MASTER_IP" ]]; then
+  SHORT_HOST="${MASTER_HOST%%.*}"
+  MASTER_IP="${MASTER_IP_MAP[$SHORT_HOST]}"
+fi
+
+if [[ -z "$MASTER_IP" ]]; then
+  MASTER_IP="${MASTER_IP_MAP[$ACTIVE_VM]}"
+fi
+
+if [[ -z "$MASTER_IP" ]]; then
+  echo "❌ Không xác định được IP tương ứng với master $ACTIVE_VM (thông tin: $ACTIVE_URL)"
   exit 1
 fi
 
-echo "🚀 Đang chạy spark-submit trên $MASTER_VM ($MASTER_IP)..."
+echo "✅ Master hiện tại: $ACTIVE_VM ($MASTER_IP)"
 
-gcloud compute ssh $MASTER_VM --project=$PROJECT_ID --zone=$ZONE \
+echo "🚀 Đang chạy spark-submit trên $ACTIVE_VM ($MASTER_IP)..."
+
+gcloud compute ssh $ACTIVE_VM --project=$PROJECT_ID --zone=$ZONE \
   --command "bash -lc '/opt/spark/bin/spark-submit \
   --master spark://10.10.0.2:7077,10.10.0.3:7077,10.10.0.4:7077 \
   --deploy-mode client \

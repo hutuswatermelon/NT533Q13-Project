@@ -1,6 +1,7 @@
+import time
+
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, pandas_udf, split, element_at, udf
-from pyspark.sql import functions as F
 from pyspark.sql.types import ArrayType, FloatType
 import io
 import numpy as np
@@ -22,6 +23,8 @@ spark = (
     .getOrCreate()
 )
 spark.sparkContext.setLogLevel("ERROR")  # 🔇 Ẩn log INFO dài dòng
+
+start_time = time.time()
 
 # ====== 2. Đọc dữ liệu ảnh ======
 DATA_PATH = "gs://nt533q13-spark-data/data/PetImages/*"
@@ -77,14 +80,12 @@ def extract_features_udf(content_series: pd.Series, origin_series: pd.Series) ->
 
 # ====== 6. Trích xuất đặc trưng ======
 feature_df = df.withColumn("features", extract_features_udf(col("image.data"), col("image.origin")))
-# Loai bo mau loi khi ResNet khong trich duoc dac trung (vector toan 0)
-feature_df = feature_df.filter(F.array_max(col("features")) != F.lit(0.0))
+feature_df = feature_df.filter(col("features").isNotNull())
 print("🧩 Đã trích xuất đặc trưng ResNet50.")
 
 # ====== 7. Chuyển features -> vector MLlib ======
 to_vector_udf = udf(lambda arr: Vectors.dense(arr), VectorUDT())
 feature_vector_df = feature_df.withColumn("features_vec", to_vector_udf(col("features")))
-feature_vector_df = feature_vector_df.cache()
 
 # ====== 8. Huấn luyện Logistic Regression ======
 print("🔧 Bắt đầu huấn luyện mô hình Logistic Regression...")
@@ -93,21 +94,10 @@ indexer = StringIndexer(inputCol="label", outputCol="labelIndex")
 indexer_model = indexer.fit(feature_vector_df)
 data_indexed = indexer_model.transform(feature_vector_df)
 
-# Can bang trong so lop de giam lech class imbalance
-class_counts = data_indexed.groupBy("labelIndex").count().collect()
-total = sum(row["count"] for row in class_counts)
-num_classes = max(len(class_counts), 1)
-weight_map = {int(row["labelIndex"]): float(total / (num_classes * row["count"])) for row in class_counts if row["count"]}
-weight_udf = udf(lambda idx: weight_map.get(int(idx), 1.0), FloatType())
-data_indexed = data_indexed.withColumn("classWeight", weight_udf(col("labelIndex")))
-
 train_df, test_df = data_indexed.randomSplit([0.8, 0.2], seed=42)
 
-lr = LogisticRegression(featuresCol="features_vec", labelCol="labelIndex", weightCol="classWeight", maxIter=50, regParam=0.01, elasticNetParam=0.0)
+lr = LogisticRegression(featuresCol="features_vec", labelCol="labelIndex", maxIter=50)
 lr_model = lr.fit(train_df)
-
-if train_df.rdd.isEmpty():
-    raise RuntimeError("Không còn dữ liệu hợp lệ sau khi lọc; cần nới điều kiện hoặc kiểm tra nguồn ảnh.")
 
 # ====== 9. Đánh giá ======
 predictions = lr_model.transform(test_df)
@@ -121,6 +111,8 @@ accuracy = evaluator.evaluate(predictions)
 
 # In ra kết quả và lưu file
 print(f"\n🎯 Độ chính xác mô hình trên tập test: {accuracy:.4f}")
+elapsed = time.time() - start_time
+print(f"⏱️ Tổng thời gian thực thi: {elapsed:.2f} giây")
 RESULTS_DIR = "gs://nt533q13-spark-data/models/dogcat_lr_metrics"
 MODEL_DIR = "gs://nt533q13-spark-data/models/dogcat_lr_model"
 LABELS_DIR = "gs://nt533q13-spark-data/models/dogcat_lr_labels"

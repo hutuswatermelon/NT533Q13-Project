@@ -220,11 +220,15 @@
 
                 <section class="card">
                     <h2>Batch Classification</h2>
-                    <form method="post" action="{{ url_for('batch_classify_dogcat_route') }}" enctype="multipart/form-data">
+                    <form id="dogcatBatchForm" enctype="multipart/form-data">
                         <section>
                             <label for="zipFile">Upload ZIP (multiple images)</label>
                             <input id="zipFile" name="zip_file" type="file" accept=".zip" required>
                             <p class="helper-text">ZIP file containing JPG/PNG images</p>
+                        </section>
+                        <section class="status" id="dogcatStatus" hidden>
+                            <p id="dogcatStatusText"></p>
+                            <a id="dogcatDownloadLink" href="#" hidden>Download results</a>
                         </section>
                         <button type="submit">Upload & Classify</button>
                     </form>
@@ -234,6 +238,60 @@
     </div>
 
     <script>
+        const batchForm = document.getElementById('dogcatBatchForm');
+        const statusBox = document.getElementById('dogcatStatus');
+        const statusText = document.getElementById('dogcatStatusText');
+        const downloadLink = document.getElementById('dogcatDownloadLink');
+
+        async function pollBatchStatus(taskId) {
+            statusBox.hidden = false;
+            statusText.textContent = `Task ${taskId} đang xử lý...`;
+            downloadLink.hidden = true;
+
+            const interval = setInterval(async () => {
+                const resp = await fetch(`/batch_status/${taskId}`);
+                if (!resp.ok) {
+                    statusText.textContent = `Có lỗi khi kiểm tra trạng thái (${resp.status})`;
+                    clearInterval(interval);
+                    return;
+                }
+                const payload = await resp.json();
+                if (payload.status === 'completed' && payload.result_url) {
+                    statusText.textContent = `✅ Task ${taskId} hoàn tất.`;
+                    downloadLink.href = payload.result_url;
+                    downloadLink.hidden = false;
+                    clearInterval(interval);
+                } else if (payload.error) {
+                    statusText.textContent = `❌ Task lỗi: ${payload.error}`;
+                    clearInterval(interval);
+                }
+            }, 4000);
+        }
+
+        batchForm?.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const formData = new FormData(batchForm);
+            statusBox.hidden = false;
+            statusText.textContent = 'Đang upload và khởi tạo job...';
+            downloadLink.hidden = true;
+
+            try {
+                const response = await fetch('/batch_classify_dogcat', {
+                    method: 'POST',
+                    body: formData
+                });
+                if (!response.ok) {
+                    const errPayload = await response.json().catch(() => ({}));
+                    throw new Error(errPayload.error || `HTTP ${response.status}`);
+                }
+                const payload = await response.json();
+                statusText.textContent = `Task ${payload.task_id} đã gửi đi, đang chờ kết quả...`;
+                pollBatchStatus(payload.task_id);
+            } catch (err) {
+                statusText.textContent = `❌ Upload thất bại: ${err.message}`;
+            }
+        });
+
         const modelInputs = document.querySelectorAll('input[name="model"]');
         const sections = document.querySelectorAll('.model-section');
 

@@ -1,17 +1,16 @@
+import csv
 import io
 import os
 import uuid
 import tempfile
-import zipfile
-from pathlib import Path
 from threading import Lock, RLock
 from dataclasses import dataclass
 from typing import Dict, Optional
 
 import requests
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template
 from google.cloud import storage
-from pyspark.sql import SparkSession, Row, functions as F
+from pyspark.sql import SparkSession, Row
 from pyspark.ml import PipelineModel
 from pyspark.ml.linalg import Vectors
 from pyspark.ml.classification import LogisticRegressionModel
@@ -29,6 +28,19 @@ SPARK_JOB_SCRIPT = "gs://nt533q13-api-data/code/classify_images_job.py"
 TELCO_MODEL_PATH = "gs://nt533q13-spark-data/models/telco_rf"
 DOGCAT_MODEL_PATH = "gs://nt533q13-spark-data/models/dogcat_lr_model"
 DOGCAT_LABEL_PATH = "gs://nt533q13-spark-data/models/dogcat_lr_labels"
+
+AVAILABLE_MODELS = [
+    {"id": "telco_rf", "name": "Random Forest (Telco Churn)"},
+    {"id": "dogcat_lr", "name": "Logistic Regression (Dog vs Cat)"},
+]
+
+REQUIRED_COLUMNS = [
+    "customerID", "gender", "SeniorCitizen", "Partner", "Dependents",
+    "tenure", "PhoneService", "MultipleLines", "InternetService",
+    "OnlineSecurity", "OnlineBackup", "DeviceProtection", "TechSupport",
+    "StreamingTV", "StreamingMovies", "Contract", "PaperlessBilling",
+    "PaymentMethod", "MonthlyCharges", "TotalCharges",
+]
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -122,7 +134,7 @@ def classify_dog_cat(image_file):
 
     idx = int(pred["prediction"])
     prob = float(pred["probability"][idx])
-    return {"prediction": labels.get(idx, str(idx)), "confidence": f"{prob*100:.2f}%"}
+    return {"prediction": labels.get(idx, str(idx)), "probability": prob}
 
 
 # ==============================
@@ -165,7 +177,11 @@ def predict_telco_churn(form_data):
 
     df = spark.createDataFrame([data])
     pred = model.transform(df).collect()[0]
-    return {"prediction": int(pred["prediction"]), "probability": float(pred["probability"][1])}
+    return {
+        "prediction": int(pred["prediction"]),
+        "probability": float(pred["probability"][1]),
+        "input_data": data,
+    }
 
 
 # ==============================
@@ -235,6 +251,13 @@ class BatchJob:
 
 job_registry: Dict[str, BatchJob] = {}
 registry_lock = Lock()
+
+
+def wants_json_response() -> bool:
+    best = request.accept_mimetypes.best_match(["application/json", "text/html"])
+    if best is None:
+        return False
+    return best == "application/json" and request.accept_mimetypes[best] > request.accept_mimetypes["text/html"]
 
 
 @app.route("/batch_classify_dogcat", methods=["POST"])
@@ -312,23 +335,116 @@ def batch_status(job_id):
 # ==============================
 # 🔬 Small routes
 # ==============================
+@app.route("/", methods=["GET"])
+def index():
+    selected_model = request.args.get("model", AVAILABLE_MODELS[0]["id"])
+    return render_template(
+        "index.html",
+        models=AVAILABLE_MODELS,
+        selected_model=selected_model,
+        required_columns=REQUIRED_COLUMNS,
+    )
+
+
 @app.route("/predict/dogcat", methods=["POST"])
-def predict_dogcat_route():
+def predict_dogcat():
     image_file = request.files.get("image")
+    if not image_file or not image_file.filename:
+        error = "Upload image file required."
+        if wants_json_response():
+            return jsonify({"error": error}), 400
+        return render_template("result_dogcat.html", error=error), 400
+
     try:
+        image_file.stream.seek(0)
         result = classify_dog_cat(image_file)
-        return jsonify(result)
+        result["input_data"] = {"filename": image_file.filename}
+        if wants_json_response():
+            return jsonify(result)
+        return render_template("result_dogcat.html", result=result)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        error = str(e)
+        if wants_json_response():
+            return jsonify({"error": error}), 500
+        return render_template("result_dogcat.html", error=error), 500
 
 
 @app.route("/predict/telco", methods=["POST"])
-def predict_telco_route():
+def predict_telco():
     try:
         result = predict_telco_churn(request.form)
-        return jsonify(result)
+        if wants_json_response():
+            return jsonify(result)
+        return render_template("result_telco.html", result=result)
+    except ValueError as exc:
+        error = str(exc)
+        if wants_json_response():
+            return jsonify({"error": error}), 400
+        return render_template("result_telco.html", error=error), 400
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        error = str(e)
+        if wants_json_response():
+            return jsonify({"error": error}), 500
+        return render_template("result_telco.html", error=error), 500
+
+
+@app.route("/batch_predict_telco_csv", methods=["POST"])
+def batch_predict_telco_csv():
+    csv_file = request.files.get("file")
+    if not csv_file or not csv_file.filename:
+        error = "Upload CSV file required."
+        if wants_json_response():
+            return jsonify({"error": error}), 400
+        return render_template("result_telco_batch.html", error=error), 400
+
+    try:
+        content = csv_file.read().decode("utf-8-sig")
+    except UnicodeDecodeError:
+        error = "Unable to decode CSV file. Please use UTF-8 encoding."
+        if wants_json_response():
+            return jsonify({"error": error}), 400
+        return render_template("result_telco_batch.html", error=error), 400
+
+    reader = csv.DictReader(io.StringIO(content))
+    if not reader.fieldnames:
+        error = "CSV header not found."
+        if wants_json_response():
+            return jsonify({"error": error}), 400
+        return render_template("result_telco_batch.html", error=error), 400
+
+    results = []
+    errors = []
+    rows = list(reader)
+    if not rows:
+        error = "CSV file is empty."
+        if wants_json_response():
+            return jsonify({"error": error}), 400
+        return render_template("result_telco_batch.html", error=error), 400
+
+    for idx, row in enumerate(rows, start=1):
+        if not any(value.strip() for value in row.values() if isinstance(value, str)):
+            continue
+        try:
+            result = predict_telco_churn(row)
+            results.append({
+                "row": idx,
+                "customerID": result["input_data"].get("customerID") or row.get("customerID") or f"row-{idx}",
+                "prediction": result["prediction"],
+                "probability": result["probability"],
+            })
+        except Exception as exc:  # capture per-row validation issues
+            errors.append({"row": idx, "error": str(exc)})
+
+    if wants_json_response():
+        payload = {"results": results, "errors": errors}
+        status_code = 200 if results else 400
+        return jsonify(payload), status_code
+
+    if not results:
+        error = "No valid rows processed."
+        return render_template("result_telco_batch.html", error=error, errors=errors), 400
+
+    return render_template("result_telco_batch.html", results=results, errors=errors)
 
 
 @app.route("/health", methods=["GET"])

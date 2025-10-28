@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Telco Batch Results</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <main class="container">
+        <h1>📂 Telco Batch Prediction</h1>
+
+        {% if error %}
+            <div class="error-box">
+                <h2>❌ Error</h2>
+                <p>{{ error }}</p>
+            </div>
+        {% else %}
+            {% if results %}
+                <section class="card">
+                    <h2>Predictions</h2>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Customer ID</th>
+                                <th>Prediction</th>
+                                <th>Churn Probability</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in results %}
+                            <tr>
+                                <td>{{ row.row }}</td>
+                                <td>{{ row.customerID }}</td>
+                                <td class="{{ 'churn-yes' if row.prediction == 1 else 'churn-no' }}">
+                                    {{ 'CHURN' if row.prediction == 1 else 'STAY' }}
+                                </td>
+                                <td>{{ '%.2f'|format(row.probability * 100) }}%</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </section>
+            {% else %}
+                <p>No valid rows processed.</p>
+            {% endif %}
+
+            {% if errors %}
+                <section class="card warning">
+                    <h2>Rows With Issues</h2>
+                    <ul class="data-list">{% for item in errors %}<li><span>Row {{ item.row }}:</span><span>{{ item.error }}</span></li>{% endfor %}</ul>
+                </section>
+            {% endif %}
+        {% endif %}
+
+        <a class="back-link" href="{{ url_for('index', model='telco_rf') }}">← Back to Dashboard</a>
+    </main>
+</body>
+</html>

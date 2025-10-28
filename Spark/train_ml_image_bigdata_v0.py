@@ -97,7 +97,7 @@ data_indexed = indexer_model.transform(feature_vector_df)
 class_counts = data_indexed.groupBy("labelIndex").count().collect()
 total = sum(row["count"] for row in class_counts)
 num_classes = max(len(class_counts), 1)
-weight_map = {int(rw["labelIndex"]): float(total / (num_classes * row["count"])) for row in class_counts if row["count"]}
+weight_map = {int(row["labelIndex"]): float(total / (num_classes * row["count"])) for row in class_counts if row["count"]}
 weight_udf = udf(lambda idx: weight_map.get(int(idx), 1.0), FloatType())
 data_indexed = data_indexed.withColumn("classWeight", weight_udf(col("labelIndex")))
 
@@ -105,9 +105,6 @@ train_df, test_df = data_indexed.randomSplit([0.8, 0.2], seed=42)
 
 lr = LogisticRegression(featuresCol="features_vec", labelCol="labelIndex", weightCol="classWeight", maxIter=50, regParam=0.01, elasticNetParam=0.0)
 lr_model = lr.fit(train_df)
-
-if train_df.rdd.isEmpty():
-    raise RuntimeError("Không còn dữ liệu hợp lệ sau khi lọc; cần nới điều kiện hoặc kiểm tra nguồn ảnh.")
 
 # ====== 9. Đánh giá ======
 predictions = lr_model.transform(test_df)

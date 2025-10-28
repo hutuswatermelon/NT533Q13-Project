@@ -1,3 +1,5 @@
+import time
+
 from pyspark.sql import SparkSession
 from pyspark.ml import Pipeline
 from pyspark.ml.feature import StringIndexer, OneHotEncoder, VectorAssembler
@@ -7,6 +9,8 @@ from pyspark.sql.functions import col, when
 
 spark = SparkSession.builder.appName("TelcoChurnPrediction").getOrCreate()
 spark.sparkContext.setLogLevel("WARN")
+
+start_time = time.time()
 
 df = spark.read.option("header", True).option("inferSchema", True).csv("gs://nt533q13-spark-data/data/telco_customer_churn.csv")
 
@@ -55,6 +59,9 @@ leave = predictions.filter(col("prediction") == 1.0).count()
 print(f"🏠 Ở lại: {stay} khách hàng")
 print(f"🚪 Rời đi: {leave} khách hàng")
 print(f"Tổng cộng: {total} khách hàng")
+
+elapsed = time.time() - start_time
+print(f"⏱️ Tổng thời gian thực thi: {elapsed:.2f} giây")
 
 model.write().overwrite().save("gs://nt533q13-spark-data/models/telco_rf")
 print("✅ Model saved to gs://nt533q13-spark-data/models/telco_rf")
