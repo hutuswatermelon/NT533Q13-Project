@@ -161,6 +161,26 @@ def generate_signed_url(gcs_uri: str, expiration=3600) -> str:
     return blob.generate_signed_url(expiration=expiration)
 
 # ==============================
+# GTìm master Spark active (mới cho batch image)
+# ==============================
+SPARK_MASTERS = [
+    "10.10.0.2:6066",
+    "10.10.0.3:6066",
+    "10.10.0.4:6066"
+]
+
+def get_active_master():
+    for host in SPARK_MASTERS:
+        try:
+            r = requests.get(f"http://{host}/v1/submissions/status/dummy", timeout=2)
+            if r.status_code in (200, 400, 404):
+                print(f"✅ Active Spark master found: {host}")
+                return f"http://{host}"
+        except requests.exceptions.RequestException:
+            continue
+    raise RuntimeError("❌ No active Spark master reachable.")
+
+# ==============================
 # 🚀 Spark REST submit (mới cho batch image)
 # ==============================
 import requests
@@ -212,8 +232,8 @@ def submit_spark_job(job_id: str, zip_uri: str, model_path: str, label_path: str
             "spark.speculation.multiplier": "1.5"
         }
     }
-    r = requests.post(SPARK_MASTER_REST, json=payload, timeout=30)
-    r.raise_for_status()
+    active_master = get_active_master()
+    r = requests.post(f"{active_master}/v1/submissions/create", json=payload, timeout=30)
     return r.json()
 
 
