@@ -246,9 +246,8 @@ def index():
         required_columns=REQUIRED_COLUMNS,
     )
 
-@app.route("/predict/telco", methods=["POST"], endpoint="predict_telco")
-def predict_telco_route():
-    """GIỮ NGUYÊN."""
+@app.route("/predict/telco", methods=["POST"])
+def predict_telco():
     try:
         result = predict_telco_churn(request.form)
         return render_template("result_telco.html", result=result)
@@ -256,8 +255,7 @@ def predict_telco_route():
         return render_template("result_telco.html", error=str(e))
 
 @app.route("/predict/dogcat", methods=["POST"])
-def predict_dogcat_route():
-    """GIỮ NGUYÊN."""
+def predict_dogcat():
     try:
         image_file = request.files.get("image")
         result = classify_dog_cat(image_file)
@@ -265,7 +263,7 @@ def predict_dogcat_route():
     except Exception as e:
         return render_template("result_dogcat.html", error=str(e))
 
-@app.route("/batch_predict", methods=["POST"])
+@app.route("/batch_predict_telco_csv", methods=["POST"])
 def batch_predict_telco_csv():
     """GIỮ NGUYÊN — Batch Telco từ CSV (xử lý tại API bằng Spark driver)."""
     uploaded_file = request.files.get("file")
@@ -372,7 +370,7 @@ def batch_classify_dogcat_submit():
         except Exception:
             pass
 
-@app.route("/batch_classify_dogcat/<job_id>/status", methods=["GET"])
+@app.route("/batch_status/<job_id>", methods=["GET"])
 def batch_classify_dogcat_status(job_id):
     """Poll kết quả: khi có preds.csv sẽ trả signed URL."""
     with registry_lock:
