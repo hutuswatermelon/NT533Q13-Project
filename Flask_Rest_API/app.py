@@ -246,7 +246,7 @@ def index():
         required_columns=REQUIRED_COLUMNS,
     )
 
-@app.route("/predict/telco", methods=["POST"])
+@app.route("/predict/telco", methods=["POST"], endpoint="predict_telco")
 def predict_telco_route():
     """GIỮ NGUYÊN."""
     try:
