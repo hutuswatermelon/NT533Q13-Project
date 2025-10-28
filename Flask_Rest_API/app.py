@@ -1,38 +1,68 @@
-import csv
 import io
 import os
 import uuid
 import tempfile
-from threading import Lock, RLock
 from dataclasses import dataclass
+from threading import Lock
 from typing import Dict, Optional
 
-import requests
-from flask import Flask, request, jsonify, render_template
-from google.cloud import storage
-from pyspark.sql import SparkSession, Row
-from pyspark.ml import PipelineModel
-from pyspark.ml.linalg import Vectors
-from pyspark.ml.classification import LogisticRegressionModel
-from PIL import Image, ImageFile
 import numpy as np
+from PIL import Image, ImageFile
+from flask import Flask, request, render_template, send_file, jsonify, url_for
+from google.cloud import storage
+from tensorflow.keras.applications.resnet50 import ResNet50, preprocess_input
+
+from pyspark.sql import SparkSession, Row
+from pyspark.sql import functions as F
+from pyspark.ml import PipelineModel
+from pyspark.ml.classification import LogisticRegressionModel
+from pyspark.ml.linalg import Vectors
 
 # ==============================
 # ⚙️ Config
 # ==============================
 PROJECT_ID = "nt533q13-distributed-ml"
+
+# Bucket cho API (lưu code job + dữ liệu job)
 API_BUCKET = "nt533q13-api-data"
+
+# Spark Master REST
 SPARK_MASTER_REST = "http://10.10.0.2:6066/v1/submissions/create"
+
+# Spark job script path trong GCS
 SPARK_JOB_SCRIPT = "gs://nt533q13-api-data/code/classify_images_job.py"
 
+# Model & labels trong GCS (để Spark job dùng)
 TELCO_MODEL_PATH = "gs://nt533q13-spark-data/models/telco_rf"
 DOGCAT_MODEL_PATH = "gs://nt533q13-spark-data/models/dogcat_lr_model"
 DOGCAT_LABEL_PATH = "gs://nt533q13-spark-data/models/dogcat_lr_labels"
 
-AVAILABLE_MODELS = [
-    {"id": "telco_rf", "name": "Random Forest (Telco Churn)"},
-    {"id": "dogcat_lr", "name": "Logistic Regression (Dog vs Cat)"},
-]
+ImageFile.LOAD_TRUNCATED_IMAGES = True
+
+app = Flask(__name__)
+storage_client = storage.Client(project=PROJECT_ID)
+
+# ==============================
+# 🔥 SparkSession (cho 3 route cũ)
+# ==============================
+spark = (
+    SparkSession.builder
+    .appName("MLPredictionAPI")
+    .config("spark.jars", "/opt/spark/jars/gcs-connector.jar")
+    .config("spark.hadoop.fs.gs.impl", "com.google.cloud.hadoop.fs.gcs.GoogleHadoopFileSystem")
+    .config("spark.hadoop.google.cloud.auth.service.account.enable", "true")
+    .config("spark.hadoop.fs.gs.project.id", PROJECT_ID)
+    .getOrCreate()
+)
+
+# Load models & labels (cho 3 route cũ)
+telco_model = PipelineModel.load(TELCO_MODEL_PATH)
+dogcat_model = LogisticRegressionModel.load(DOGCAT_MODEL_PATH)
+resnet_model = ResNet50(weights="imagenet", include_top=False, pooling="avg")
+dogcat_labels = {
+    int(row["index"]): row["label"]
+    for row in spark.read.json(DOGCAT_LABEL_PATH).collect()
+}
 
 REQUIRED_COLUMNS = [
     "customerID", "gender", "SeniorCitizen", "Partner", "Dependents",
@@ -42,170 +72,101 @@ REQUIRED_COLUMNS = [
     "PaymentMethod", "MonthlyCharges", "TotalCharges",
 ]
 
-ImageFile.LOAD_TRUNCATED_IMAGES = True
-
-app = Flask(__name__)
-storage_client = storage.Client(project=PROJECT_ID)
-
-_spark = None
-_telco_model = None
-_dogcat_model = None
-_dogcat_labels = None
-_resnet_model = None
-_resnet_lock = RLock()
-
+AVAILABLE_MODELS = [
+    {"id": "telco_rf", "name": "Random Forest (Telco Churn)"},
+    {"id": "dogcat_lr", "name": "Logistic Regression (Dog vs Cat)"},
+]
 
 # ==============================
-# 🧩 Spark utils
+# 🔧 Helpers (cũ)
 # ==============================
-def get_spark():
-    global _spark
-    if _spark is None:
-        _spark = (
-            SparkSession.builder
-            .appName("FlaskAPI")
-            .config("spark.jars", "/opt/spark/jars/gcs-connector.jar")
-            .config("spark.hadoop.fs.gs.impl", "com.google.cloud.hadoop.fs.gcs.GoogleHadoopFileSystem")
-            .config("spark.hadoop.google.cloud.auth.service.account.enable", "true")
-            .config("spark.hadoop.fs.gs.project.id", PROJECT_ID)
-            .getOrCreate()
-        )
-        print("✅ SparkSession ready.")
-    return _spark
+def extract_image_features(file_storage):
+    """Trích xuất features từ ảnh sử dụng ResNet50 (cho route 1 image)."""
+    image = Image.open(file_storage.stream).convert("RGB").resize((224, 224))
+    array = np.asarray(image).astype("float32")
+    array = np.expand_dims(array, axis=0)
+    array = preprocess_input(array)
+    features = resnet_model.predict(array, verbose=0)
+    return features.flatten().astype("float32")
 
 
-def get_telco_model():
-    global _telco_model
-    if _telco_model is None:
-        _telco_model = PipelineModel.load(TELCO_MODEL_PATH)
-    return _telco_model
-
-
-def get_dogcat_model():
-    global _dogcat_model
-    if _dogcat_model is None:
-        _dogcat_model = LogisticRegressionModel.load(DOGCAT_MODEL_PATH)
-    return _dogcat_model
-
-
-def get_dogcat_labels():
-    global _dogcat_labels
-    if _dogcat_labels is None:
-        spark = get_spark()
-        _dogcat_labels = {
-            int(row["index"]): row["label"]
-            for row in spark.read.json(DOGCAT_LABEL_PATH).collect()
-        }
-    return _dogcat_labels
-
-
-# ==============================
-# 🐶 DogCat single image
-# ==============================
-def _get_resnet_model():
-    from tensorflow.keras.applications.resnet50 import ResNet50
-
-    global _resnet_model
-    if _resnet_model is None:
-        with _resnet_lock:
-            if _resnet_model is None:
-                _resnet_model = ResNet50(weights="imagenet", include_top=False, pooling="avg")
-    return _resnet_model
-
-
-def classify_dog_cat(image_file):
-    from tensorflow.keras.applications.resnet50 import preprocess_input
-
-    if not image_file:
-        raise ValueError("No image uploaded.")
-
-    resnet = _get_resnet_model()
-    img = Image.open(image_file.stream).convert("RGB").resize((224, 224))
-    arr = np.expand_dims(np.asarray(img).astype("float32"), axis=0)
-    arr = preprocess_input(arr)
-    with _resnet_lock:
-        feat = resnet.predict(arr, verbose=0).flatten()
-
-    spark = get_spark()
-    model = get_dogcat_model()
-    labels = get_dogcat_labels()
-    df = spark.createDataFrame([Row(features_vec=Vectors.dense(feat))])
-    pred = model.transform(df).collect()[0]
-
-    idx = int(pred["prediction"])
-    prob = float(pred["probability"][idx])
-    return {"prediction": labels.get(idx, str(idx)), "probability": prob}
-
-
-# ==============================
-# 📊 Telco churn single
-# ==============================
 def predict_telco_churn(form_data):
-    spark = get_spark()
-    model = get_telco_model()
-
-    try:
-        data = {
-            "customerID": form_data.get("customerID"),
-            "gender": form_data.get("gender"),
-            "SeniorCitizen": int(form_data.get("SeniorCitizen", 0)),
-            "Partner": form_data.get("Partner"),
-            "Dependents": form_data.get("Dependents"),
-            "tenure": int(form_data.get("tenure", 0)),
-            "PhoneService": form_data.get("PhoneService"),
-            "MultipleLines": form_data.get("MultipleLines"),
-            "InternetService": form_data.get("InternetService"),
-            "OnlineSecurity": form_data.get("OnlineSecurity"),
-            "OnlineBackup": form_data.get("OnlineBackup"),
-            "DeviceProtection": form_data.get("DeviceProtection"),
-            "TechSupport": form_data.get("TechSupport"),
-            "StreamingTV": form_data.get("StreamingTV"),
-            "StreamingMovies": form_data.get("StreamingMovies"),
-            "Contract": form_data.get("Contract"),
-            "PaperlessBilling": form_data.get("PaperlessBilling"),
-            "PaymentMethod": form_data.get("PaymentMethod"),
-            "MonthlyCharges": float(form_data.get("MonthlyCharges", 0.0)),
-            "TotalCharges": form_data.get("TotalCharges", "0"),
-        }
-    except ValueError as exc:
-        raise ValueError(f"Invalid numeric input: {exc}")
-
-    total_charges = data["TotalCharges"]
-    if isinstance(total_charges, str):
-        total_charges = total_charges.strip()
-    data["TotalCharges"] = float(total_charges) if total_charges not in (None, "") else 0.0
-
-    df = spark.createDataFrame([data])
-    pred = model.transform(df).collect()[0]
+    """Dự đoán churn (đơn chiếc) — GIỮ NGUYÊN."""
+    data = {
+        "customerID": form_data.get("customerID"),
+        "gender": form_data.get("gender"),
+        "SeniorCitizen": int(form_data.get("SeniorCitizen")),
+        "Partner": form_data.get("Partner"),
+        "Dependents": form_data.get("Dependents"),
+        "tenure": int(form_data.get("tenure")),
+        "PhoneService": form_data.get("PhoneService"),
+        "MultipleLines": form_data.get("MultipleLines"),
+        "InternetService": form_data.get("InternetService"),
+        "OnlineSecurity": form_data.get("OnlineSecurity"),
+        "OnlineBackup": form_data.get("OnlineBackup"),
+        "DeviceProtection": form_data.get("DeviceProtection"),
+        "TechSupport": form_data.get("TechSupport"),
+        "StreamingTV": form_data.get("StreamingTV"),
+        "StreamingMovies": form_data.get("StreamingMovies"),
+        "Contract": form_data.get("Contract"),
+        "PaperlessBilling": form_data.get("PaperlessBilling"),
+        "PaymentMethod": form_data.get("PaymentMethod"),
+        "MonthlyCharges": float(form_data.get("MonthlyCharges")),
+        "TotalCharges": float(form_data.get("TotalCharges")),
+    }
+    data_for_model = {k: v for k, v in data.items() if k != "customerID"}
+    df = spark.createDataFrame([data_for_model])
+    prediction = telco_model.transform(df).collect()[0]
+    label = int(prediction["prediction"])
+    prob = float(prediction["probability"][1])
     return {
-        "prediction": int(pred["prediction"]),
-        "probability": float(pred["probability"][1]),
+        "prediction": label,
+        "probability": prob,
         "input_data": data,
+        "model_type": "telco_churn",
     }
 
 
+def classify_dog_cat(image_file):
+    """Phân loại 1 ảnh dog/cat — GIỮ NGUYÊN."""
+    if not image_file or image_file.filename == "":
+        raise ValueError("Please upload an image.")
+    features = extract_image_features(image_file)
+    df = spark.createDataFrame([Row(features_vec=Vectors.dense(features))])
+    prediction = dogcat_model.transform(df).collect()[0]
+    pred_idx = int(prediction["prediction"])
+    label = dogcat_labels.get(pred_idx, str(pred_idx))
+    prob = float(prediction["probability"][pred_idx])
+    return {
+        "prediction": label,
+        "probability": prob,
+        "input_data": {"filename": image_file.filename},
+        "model_type": "dogcat_classification",
+    }
+
 # ==============================
-# ☁️ Helper: upload to GCS
+# ☁️ GCS utils (mới cho batch image)
 # ==============================
-def upload_to_gcs(file_path: str, dest_blob: str):
+def upload_to_gcs(local_path: str, dest_blob: str) -> str:
     bucket = storage_client.bucket(API_BUCKET)
     blob = bucket.blob(dest_blob)
-    blob.upload_from_filename(file_path)
+    blob.upload_from_filename(local_path)
     blob.make_private()
     return f"gs://{API_BUCKET}/{dest_blob}"
 
 
-def generate_signed_url(gcs_uri: str, expiration=3600):
+def generate_signed_url(gcs_uri: str, expiration=3600) -> str:
     bucket_name, blob_name = gcs_uri.replace("gs://", "").split("/", 1)
     bucket = storage_client.bucket(bucket_name)
     blob = bucket.blob(blob_name)
     return blob.generate_signed_url(expiration=expiration)
 
+# ==============================
+# 🚀 Spark REST submit (mới cho batch image)
+# ==============================
+import requests
 
-# ==============================
-# 🚀 Spark REST submit
-# ==============================
-def submit_spark_job(job_id: str, zip_uri: str, model_path: str, label_path: str, output_prefix: str):
+def submit_spark_job(job_id: str, zip_uri: str, model_path: str, label_path: str, output_dir: str):
     payload = {
         "action": "CreateSubmissionRequest",
         "appResource": SPARK_JOB_SCRIPT,
@@ -215,19 +176,41 @@ def submit_spark_job(job_id: str, zip_uri: str, model_path: str, label_path: str
             "--zip-uri", zip_uri,
             "--lr-model-path", model_path,
             "--labels-json", label_path,
-            "--output-csv", f"{output_prefix}/preds"
+            "--output-csv", output_dir
         ],
         "sparkProperties": {
+            # ---- Tên app
             "spark.app.name": f"dogcat-{job_id}",
             "spark.submit.deployMode": "cluster",
-            "spark.master": "spark://10.10.0.2:7077",
+
+            # ---- Standalone HA: nhiều master
+            "spark.master": "spark://10.10.0.2:7077,10.10.0.3:7077,10.10.0.4:7077",
+
+            # ---- HA khôi phục qua ZooKeeper
+            "spark.deploy.recoveryMode": "ZOOKEEPER",
+            "spark.deploy.zookeeper.url": "10.10.0.2:2181,10.10.0.3:2181,10.10.0.4:2181",
+            "spark.deploy.zookeeper.dir": "/spark",
+
+            # ---- GCS connector (đủ cả FS và AbstractFS)
+            "spark.hadoop.fs.gs.impl": "com.google.cloud.hadoop.fs.gcs.GoogleHadoopFileSystem",
+            "spark.hadoop.fs.AbstractFileSystem.gs.impl": "com.google.cloud.hadoop.fs.gcs.GoogleHadoopFS",
+            "spark.hadoop.google.cloud.auth.service.account.enable": "true",
+            "spark.hadoop.fs.gs.project.id": PROJECT_ID,
+
+            # ---- Tài nguyên executor (tuỳ chỉnh theo cluster của bạn)
             "spark.executor.instances": "4",
             "spark.executor.cores": "2",
             "spark.executor.memory": "6g",
+
+            # ---- Tuỳ chọn: Dynamic Allocation (yêu cầu external shuffle service đang chạy)
             "spark.dynamicAllocation.enabled": "true",
-            "spark.hadoop.fs.gs.impl": "com.google.cloud.hadoop.fs.gcs.GoogleHadoopFileSystem",
-            "spark.hadoop.google.cloud.auth.service.account.enable": "true",
-            "spark.hadoop.fs.gs.project.id": PROJECT_ID
+            # BẬT nếu bạn đã chạy external shuffle: 
+            "spark.shuffle.service.enabled": "true",
+
+            # (tuỳ chọn) Speculation để né task chậm:
+            "spark.speculation": "true",
+            "spark.speculation.quantile": "0.75",
+            "spark.speculation.multiplier": "1.5"
         }
     }
     r = requests.post(SPARK_MASTER_REST, json=payload, timeout=30)
@@ -235,9 +218,8 @@ def submit_spark_job(job_id: str, zip_uri: str, model_path: str, label_path: str
     return r.json()
 
 
-
 # ==============================
-# 🧱 Batch endpoints
+# 🧱 Batch-image state (mới)
 # ==============================
 @dataclass
 class BatchJob:
@@ -248,92 +230,11 @@ class BatchJob:
     output_gs: Optional[str]
     error: Optional[str]
 
-
 job_registry: Dict[str, BatchJob] = {}
 registry_lock = Lock()
 
-
-def wants_json_response() -> bool:
-    best = request.accept_mimetypes.best_match(["application/json", "text/html"])
-    if best is None:
-        return False
-    return best == "application/json" and request.accept_mimetypes[best] > request.accept_mimetypes["text/html"]
-
-
-@app.route("/batch_classify_dogcat", methods=["POST"])
-def batch_classify_dogcat():
-    """Upload ZIP → GCS → Spark REST job"""
-    tmp_path = None
-    try:
-        zip_file = request.files.get("zip_file")
-        if not zip_file:
-            return jsonify({"error": "Upload ZIP file required"}), 400
-
-        job_id = uuid.uuid4().hex
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp:
-            zip_file.save(tmp.name)
-            tmp_path = tmp.name
-
-        # Upload ZIP to GCS
-        input_uri = upload_to_gcs(tmp_path, f"jobs/{job_id}/input.zip")
-        output_prefix = f"gs://{API_BUCKET}/jobs/{job_id}/results"
-
-        # (Option) unzipper service could expand ZIP → GCS images/ prefix
-        # For demo, assume already extracted manually or in Spark code
-
-        job_response = submit_spark_job(
-            job_id=job_id,
-            zip_uri=input_uri,
-            model_path=DOGCAT_MODEL_PATH,
-            label_path=DOGCAT_LABEL_PATH,
-            output_prefix=output_prefix
-        )
-
-        submission_id = job_response.get("submissionId", None)
-
-        with registry_lock:
-            job_registry[job_id] = BatchJob(
-                id=job_id,
-                status="submitted",
-                submission_id=submission_id,
-                input_gs=input_uri,
-                output_gs=output_prefix,
-                error=None,
-            )
-
-        return jsonify({"task_id": job_id, "submission_id": submission_id, "status": "submitted"}), 202
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-    finally:
-        if tmp_path and os.path.exists(tmp_path):
-            os.remove(tmp_path)
-
-
-@app.route("/batch_status/<job_id>", methods=["GET"])
-def batch_status(job_id):
-    with registry_lock:
-        job = job_registry.get(job_id)
-    if not job:
-        return jsonify({"error": "Job not found"}), 404
-
-    bucket = storage_client.bucket(API_BUCKET)
-    prefix = f"jobs/{job_id}/results/preds"
-    blobs = list(bucket.list_blobs(prefix=prefix))
-    if blobs:
-        blob = blobs[0]
-        result_uri = f"gs://{API_BUCKET}/{blob.name}"
-        signed_url = generate_signed_url(result_uri)
-        with registry_lock:
-            job.status = "completed"
-            job.output_gs = result_uri
-            job_registry[job_id] = job
-        return jsonify({"task_id": job_id, "status": "completed", "result_url": signed_url}), 200
-
-    return jsonify({"task_id": job_id, "status": job.status}), 200
-
-
 # ==============================
-# 🔬 Small routes
+# 🌐 Routes
 # ==============================
 @app.route("/", methods=["GET"])
 def index():
@@ -345,112 +246,156 @@ def index():
         required_columns=REQUIRED_COLUMNS,
     )
 
-
-@app.route("/predict/dogcat", methods=["POST"])
-def predict_dogcat():
-    image_file = request.files.get("image")
-    if not image_file or not image_file.filename:
-        error = "Upload image file required."
-        if wants_json_response():
-            return jsonify({"error": error}), 400
-        return render_template("result_dogcat.html", error=error), 400
-
-    try:
-        image_file.stream.seek(0)
-        result = classify_dog_cat(image_file)
-        result["input_data"] = {"filename": image_file.filename}
-        if wants_json_response():
-            return jsonify(result)
-        return render_template("result_dogcat.html", result=result)
-    except Exception as e:
-        error = str(e)
-        if wants_json_response():
-            return jsonify({"error": error}), 500
-        return render_template("result_dogcat.html", error=error), 500
-
-
 @app.route("/predict/telco", methods=["POST"])
-def predict_telco():
+def predict_telco_route():
+    """GIỮ NGUYÊN."""
     try:
         result = predict_telco_churn(request.form)
-        if wants_json_response():
-            return jsonify(result)
         return render_template("result_telco.html", result=result)
-    except ValueError as exc:
-        error = str(exc)
-        if wants_json_response():
-            return jsonify({"error": error}), 400
-        return render_template("result_telco.html", error=error), 400
     except Exception as e:
-        error = str(e)
-        if wants_json_response():
-            return jsonify({"error": error}), 500
-        return render_template("result_telco.html", error=error), 500
+        return render_template("result_telco.html", error=str(e))
 
-
-@app.route("/batch_predict_telco_csv", methods=["POST"])
-def batch_predict_telco_csv():
-    csv_file = request.files.get("file")
-    if not csv_file or not csv_file.filename:
-        error = "Upload CSV file required."
-        if wants_json_response():
-            return jsonify({"error": error}), 400
-        return render_template("result_telco_batch.html", error=error), 400
-
+@app.route("/predict/dogcat", methods=["POST"])
+def predict_dogcat_route():
+    """GIỮ NGUYÊN."""
     try:
-        content = csv_file.read().decode("utf-8-sig")
-    except UnicodeDecodeError:
-        error = "Unable to decode CSV file. Please use UTF-8 encoding."
-        if wants_json_response():
-            return jsonify({"error": error}), 400
-        return render_template("result_telco_batch.html", error=error), 400
+        image_file = request.files.get("image")
+        result = classify_dog_cat(image_file)
+        return render_template("result_dogcat.html", result=result)
+    except Exception as e:
+        return render_template("result_dogcat.html", error=str(e))
 
-    reader = csv.DictReader(io.StringIO(content))
-    if not reader.fieldnames:
-        error = "CSV header not found."
-        if wants_json_response():
-            return jsonify({"error": error}), 400
-        return render_template("result_telco_batch.html", error=error), 400
+@app.route("/batch_predict", methods=["POST"])
+def batch_predict_telco_csv():
+    """GIỮ NGUYÊN — Batch Telco từ CSV (xử lý tại API bằng Spark driver)."""
+    uploaded_file = request.files.get("file")
+    if not uploaded_file or uploaded_file.filename == "":
+        return render_template("result_telco.html", error="No CSV file provided.")
+    if not uploaded_file.filename.lower().endswith(".csv"):
+        return render_template("result_telco.html", error="File must be a CSV.")
 
-    results = []
-    errors = []
-    rows = list(reader)
-    if not rows:
-        error = "CSV file is empty."
-        if wants_json_response():
-            return jsonify({"error": error}), 400
-        return render_template("result_telco_batch.html", error=error), 400
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp:
+            uploaded_file.save(tmp.name)
+            tmp_path = tmp.name
 
-    for idx, row in enumerate(rows, start=1):
-        if not any(value.strip() for value in row.values() if isinstance(value, str)):
-            continue
+        df = spark.read.option("header", "true").csv(tmp_path)
+        missing_cols = [col for col in REQUIRED_COLUMNS if col not in df.columns]
+        if missing_cols:
+            return render_template("result_telco.html", error=f"Missing columns: {', '.join(missing_cols)}")
+
+        df = df.select(*REQUIRED_COLUMNS)
+        df = df.withColumn("SeniorCitizen", F.col("SeniorCitizen").cast("int"))
+        df = df.withColumn("tenure", F.col("tenure").cast("int"))
+        df = df.withColumn("MonthlyCharges", F.col("MonthlyCharges").cast("double"))
+        df = df.withColumn(
+            "TotalCharges",
+            F.when(F.trim(F.col("TotalCharges")) == "", None).otherwise(F.col("TotalCharges"))
+        )
+        df = df.withColumn("TotalCharges", F.col("TotalCharges").cast("double"))
+        df = df.fillna({"SeniorCitizen": 0, "tenure": 0, "MonthlyCharges": 0.0, "TotalCharges": 0.0})
+
+        df_with_id = df.withColumn("row_id", F.monotonically_increasing_id())
+        features_df = df_with_id.drop("customerID")
+        predictions = telco_model.transform(features_df)
+
+        result_df = (
+            predictions
+            .select("row_id", "prediction")
+            .join(df_with_id.select("row_id", "customerID"), on="row_id", how="inner")
+            .withColumn("churn", F.when(F.col("prediction") == 1, F.lit("yes")).otherwise(F.lit("no")))
+            .select(F.col("customerID").alias("id"), "churn")
+        )
+
+        csv_buffer = io.StringIO()
+        result_df.toPandas().to_csv(csv_buffer, index=False)
+        csv_buffer.seek(0)
+
+        return send_file(
+            io.BytesIO(csv_buffer.getvalue().encode("utf-8")),
+            mimetype="text/csv",
+            as_attachment=True,
+            download_name="telco_predictions.csv",
+        )
+    except Exception as e:
+        return render_template("result_telco.html", error=str(e))
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+# ==============================
+# 🌟 Batch image (MỚI) → Spark mapPartitions
+# ==============================
+@app.route("/batch_classify_dogcat", methods=["POST"])
+def batch_classify_dogcat_submit():
+    """
+    Upload ZIP (>25MB ok) → GCS → Submit Spark job
+    Spark sẽ sinh duy nhất: gs://<bucket>/jobs/<id>/results/preds.csv
+    """
+    try:
+        zip_file = request.files.get("zip_file")
+        if not zip_file or zip_file.filename == "" or not zip_file.filename.lower().endswith(".zip"):
+            return jsonify({"error": "Please upload a .zip file via field 'zip_file'."}), 400
+
+        job_id = uuid.uuid4().hex
+        tmp_zip = tempfile.mktemp(suffix=".zip")
+        zip_file.save(tmp_zip)
+
+        input_uri = upload_to_gcs(tmp_zip, f"jobs/{job_id}/input.zip")
+        output_dir = f"gs://{API_BUCKET}/jobs/{job_id}/results"
+
+        resp = submit_spark_job(
+            job_id=job_id,
+            zip_uri=input_uri,
+            model_path=DOGCAT_MODEL_PATH,
+            label_path=DOGCAT_LABEL_PATH,
+            output_dir=output_dir
+        )
+        submission_id = resp.get("submissionId")
+
+        with registry_lock:
+            job_registry[job_id] = BatchJob(
+                id=job_id,
+                status="submitted",
+                submission_id=submission_id,
+                input_gs=input_uri,
+                output_gs=output_dir,
+                error=None,
+            )
+
+        return jsonify({"task_id": job_id, "submission_id": submission_id, "status": "submitted"}), 202
+    finally:
         try:
-            result = predict_telco_churn(row)
-            results.append({
-                "row": idx,
-                "customerID": result["input_data"].get("customerID") or row.get("customerID") or f"row-{idx}",
-                "prediction": result["prediction"],
-                "probability": result["probability"],
-            })
-        except Exception as exc:  # capture per-row validation issues
-            errors.append({"row": idx, "error": str(exc)})
+            if 'tmp_zip' in locals() and os.path.exists(tmp_zip):
+                os.remove(tmp_zip)
+        except Exception:
+            pass
 
-    if wants_json_response():
-        payload = {"results": results, "errors": errors}
-        status_code = 200 if results else 400
-        return jsonify(payload), status_code
+@app.route("/batch_classify_dogcat/<job_id>/status", methods=["GET"])
+def batch_classify_dogcat_status(job_id):
+    """Poll kết quả: khi có preds.csv sẽ trả signed URL."""
+    with registry_lock:
+        job = job_registry.get(job_id)
+    if not job:
+        return jsonify({"error": "Job not found."}), 404
 
-    if not results:
-        error = "No valid rows processed."
-        return render_template("result_telco_batch.html", error=error, errors=errors), 400
+    bucket = storage_client.bucket(API_BUCKET)
+    blob = bucket.blob(f"jobs/{job_id}/results/preds.csv")
+    if blob.exists():
+        signed = generate_signed_url(f"gs://{API_BUCKET}/jobs/{job_id}/results/preds.csv")
+        job.status = "completed"
+        return jsonify({"task_id": job_id, "status": "completed", "result_url": signed}), 200
 
-    return render_template("result_telco_batch.html", results=results, errors=errors)
+    return jsonify({"task_id": job_id, "status": job.status}), 200
 
-
+# ==============================
+# 🩺 Health
+# ==============================
 @app.route("/health", methods=["GET"])
 def health():
-    return jsonify({"ok": True}), 200
-
+    return "OK", 200
 
 if __name__ == "__main__":
+    # Prod dùng gunicorn, đây là dev
     app.run(host="0.0.0.0", port=8080)
