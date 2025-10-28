@@ -151,7 +151,6 @@ def upload_to_gcs(local_path: str, dest_blob: str) -> str:
     bucket = storage_client.bucket(API_BUCKET)
     blob = bucket.blob(dest_blob)
     blob.upload_from_filename(local_path)
-    blob.make_private()
     return f"gs://{API_BUCKET}/{dest_blob}"
 
 
