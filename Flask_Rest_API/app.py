@@ -3,7 +3,6 @@ import os
 import tempfile
 import zipfile
 import uuid
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from queue import Queue
@@ -146,15 +145,19 @@ class DogCatActor:
         }
         print("✅ DogCatActor is ready on worker.")
 
-    def process_batch(self, batch_paths: List[str]) -> List[Dict[str, Any]]:
+    def process_batch(self, batch_payload: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         from tensorflow.keras.applications.resnet50 import preprocess_input
         from pyspark.sql import Row
         from pyspark.ml.linalg import Vectors
 
         results = []
-        for p in batch_paths:
+        for item in batch_payload:
             try:
-                im = Image.open(p).convert("RGB").resize((224, 224))
+                filename = item["filename"]
+                if "error" in item:
+                    raise ValueError(item["error"])
+                content = item["content"]
+                im = Image.open(io.BytesIO(content)).convert("RGB").resize((224, 224))
                 arr = np.expand_dims(np.asarray(im).astype("float32"), axis=0)
                 arr = preprocess_input(arr)
                 feat = self.resnet.predict(arr, verbose=0).flatten()
@@ -165,12 +168,12 @@ class DogCatActor:
                 prob = float(pred["probability"][idx])
 
                 results.append({
-                    "filename": os.path.basename(p),
+                    "filename": filename,
                     "prediction": self.labels.get(idx, str(idx)),
                     "confidence": f"{prob * 100:.2f}%"
                 })
             except Exception as e:
-                results.append({"filename": os.path.basename(p), "prediction": "ERROR", "confidence": str(e)})
+                results.append({"filename": item.get("filename", "unknown"), "prediction": "ERROR", "confidence": str(e)})
         return results
 
 
@@ -222,35 +225,50 @@ DOGCAT_ACTOR_TARGET = int(os.getenv("DOGCAT_ACTOR_TARGET", "4"))
 
 def _process_dogcat_batch_job(job: BatchJob) -> None:
     job_dir = job.zip_path.parent
-    extract_dir = job_dir / "extracted"
+    futures: List[ray.ObjectRef] = []
     try:
         with zipfile.ZipFile(job.zip_path, "r") as zip_ref:
-            zip_ref.extractall(extract_dir)
+            image_exts = {".jpg", ".jpeg", ".png", ".bmp", ".gif"}
+            members = [
+                info
+                for info in zip_ref.infolist()
+                if not info.is_dir() and Path(info.filename).suffix.lower() in image_exts
+            ]
+            if not members:
+                raise ValueError("No valid image files found in ZIP.")
 
-        image_exts = {".jpg", ".jpeg", ".png", ".bmp", ".gif"}
-        image_paths = [
-            os.path.join(root, f)
-            for root, _, files in os.walk(extract_dir)
-            for f in files
-            if Path(f).suffix.lower() in image_exts
-        ]
-        if not image_paths:
-            raise ValueError("No valid image files found in ZIP.")
+            pool = get_or_create_actor_pool(target_workers=DOGCAT_ACTOR_TARGET)
 
-        pool = get_or_create_actor_pool(target_workers=DOGCAT_ACTOR_TARGET)
-        batches = [
-            image_paths[i:i + job.batch_size]
-            for i in range(0, len(image_paths), job.batch_size)
-        ]
+            for batch_index in range(0, len(members), job.batch_size):
+                batch_infos = members[batch_index: batch_index + job.batch_size]
+                payload: List[Dict[str, Any]] = []
+                for info in batch_infos:
+                    try:
+                        with zip_ref.open(info) as img_file:
+                            content = img_file.read()
+                        if not content:
+                            continue
+                        payload.append({
+                            "filename": Path(info.filename).name,
+                            "content": content,
+                        })
+                    except Exception as exc:
+                        payload.append({
+                            "filename": Path(info.filename).name,
+                            "content": b"",
+                            "error": str(exc),
+                        })
+                if not payload:
+                    continue
+                actor = pool[len(futures) % len(pool)]
+                futures.append(actor.process_batch.remote(payload))
 
-        futures = []
-        for idx, batch in enumerate(batches):
-            actor = pool[idx % len(pool)]
-            futures.append(actor.process_batch.remote(batch))
-
-        all_results = []
-        for partial in ray.get(futures):
-            all_results.extend(partial)
+        all_results: List[Dict[str, Any]] = []
+        if futures:
+            for partial in ray.get(futures):
+                all_results.extend(partial)
+        else:
+            raise ValueError("No valid batches were scheduled for processing.")
 
         import pandas as pd
 
@@ -265,7 +283,10 @@ def _process_dogcat_batch_job(job: BatchJob) -> None:
             job.status = "failed"
             job.error = str(exc)
     finally:
-        shutil.rmtree(extract_dir, ignore_errors=True)
+        try:
+            os.remove(job.zip_path)
+        except OSError:
+            pass
 
 
 def _batch_worker_loop() -> None:
