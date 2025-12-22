@@ -127,5 +127,5 @@ Mặc dù hệ thống đã đáp ứng được các mục tiêu chính của �
 ---
 
 ## Ghi chú
-Dự án phục vụ mục đích học tập và nghiên cứu
-Không khuyến nghị sử dụng trực tiếp cho môi trường production
+- Dự án phục vụ mục đích học tập và nghiên cứu
+- Không khuyến nghị sử dụng trực tiếp cho môi trường production
